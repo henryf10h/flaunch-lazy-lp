@@ -24,7 +24,7 @@ Memecoin launchpads have traditionally been extractive, often benefitting Key Op
 
 ### Getting Started
 
-To start using the ƒlaunch protocol, please refer to our [documentation](https://docs.google.com/file/d/1EYEmE0a3UOT9QYIdQQ50xFMePF78vZX0/preview) which provides detailed instructions on setting up, launching, and managing your memecoin within the ƒlaunch ecosystem.
+To start using the ƒlaunch protocol, please refer to our [documentation](https://docs.flaunch.gg/flaunch-docs) which provides detailed instructions on setting up, launching, and managing your memecoin within the ƒlaunch ecosystem.
 
 For further assistance, feel free to reach out to our team through our official communication channels.
 
