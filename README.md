@@ -13,10 +13,10 @@ The ƒlaunch protocol is an innovative platform designed to revolutionize the wa
    - Coin holders have the power to halt Progressive Bid Walls and instead accumulate revenue in a treasury. This treasury can be utilized in ways determined by the token holders, fostering a community-driven economy.
 
 3. **Devs Get Revs**:
-   - Developers, known as "flaunchers," receive a percentage of all trading fees. This aligns their incentives with the long-term health of the memecoin, encouraging them to focus on sustainable growth rather than quick pumps and dumps.
+   - Developers, known as "flaunchers," receive a percentage of all trading fees. This aligns their incentives with the long-term health of the memecoin, encouraging them to focus on sustainable growth rather than quick pumps and dumps. Dev Revs are always converted to our ETH equivalent token (flETH) using our Internal Swap Pool. This means no negative token dumps to get fees.
 
 4. **Risk-Free Fair Launch**:
-   - During the initial one-hour launch period, all ETH proceeds are funneled back into a Progressive Bid Wall. This allows early buyers to exit at their entry price (minus the AMM fee), ensuring that no party has an unfair advantage, and guaranteeing a fair launch for all participants.
+   - During the initial fair launch period, all ETH proceeds are funneled back into a Progressive Bid Wall. This allows early buyers to exit at their entry price (minus the AMM fee), ensuring that no party has an unfair advantage, and guaranteeing a fair launch for all participants.
 
 ### Why ƒlaunch?
 
