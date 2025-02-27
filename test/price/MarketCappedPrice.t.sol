@@ -6,6 +6,7 @@ import {IHooks} from '@uniswap/v4-core/src/libraries/Hooks.sol';
 import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
 import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {MarketCappedPrice} from '@flaunch/price/MarketCappedPrice.sol';
 
 import {FlaunchTest} from '../FlaunchTest.sol';
@@ -26,8 +27,11 @@ contract MarketCappedPriceTest is FlaunchTest {
     PoolKey poolKey;
 
     function setUp() public {
+        // Deploy our {FlaunchFeeExemption} contract
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
         // Deploy the MarketCappedPrice contract
-        marketCappedPrice = new MarketCappedPrice(owner, address(poolManager), ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPrice(owner, address(poolManager), ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Map our Base Sepolia ETH:USDC pool for any fork tests
         poolKey = PoolKey({
@@ -84,7 +88,7 @@ contract MarketCappedPriceTest is FlaunchTest {
     function test_CanGetMarketCap() public forkBaseSepoliaBlock(17017447) {
         // As we have forked, we need to make a fresh deployment. We also need to reference
         // the Sepolia deployment of the {PoolManager}.
-        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Set our PoolId
         marketCappedPrice.setPool(poolKey);
@@ -106,7 +110,7 @@ contract MarketCappedPriceTest is FlaunchTest {
             hooks: IHooks(address(0))
         });
 
-        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Initial market cap
 
@@ -130,7 +134,7 @@ contract MarketCappedPriceTest is FlaunchTest {
     function test_CanGetPercentageBasedFlaunchingFee() public forkBaseSepoliaBlock(17017447) {
         // As we have forked, we need to make a fresh deployment. We also need to reference
         // the Sepolia deployment of the {PoolManager}.
-        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Set our PoolId
         marketCappedPrice.setPool(poolKey);
@@ -152,6 +156,36 @@ contract MarketCappedPriceTest is FlaunchTest {
         ));
 
         marketCappedPrice.getSqrtPriceX96(address(this), false, abi.encode(_marketCap));
+    }
+
+    function test_CanExcludeFlaunchFee(address _excluded, address _notExcluded) public forkBaseSepoliaBlock(17017447) {
+        // Confirm that our addresses are not the same
+        vm.assume(_excluded != _notExcluded);
+
+        // Redeploy our {FlaunchFeeExemption} contract due to fork
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
+        // Set the pool to allow for flaunching fee calculation
+        marketCappedPrice = new MarketCappedPrice(owner, 0x7Da1D65F8B249183667cdE74C5CBD46dD38AA829, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
+        marketCappedPrice.setPool(poolKey);
+
+        // Set some constants for testing
+        uint fee = 0.001923076923816568 ether;
+
+        // Set a fee exclusion for an address
+        marketCappedPrice.flaunchFeeExemption().setFeeExemption(_excluded, true);
+
+        // Confirm that the flaunch fee is now zero
+        assertEq(marketCappedPrice.getFlaunchingFee(_excluded, abi.encode(5000e6)), 0);
+
+        // Confirm that the other address still has a fee
+        assertEq(marketCappedPrice.getFlaunchingFee(_notExcluded, abi.encode(5000e6)), fee);
+
+        // Update the fee exclusion
+        marketCappedPrice.flaunchFeeExemption().setFeeExemption(_excluded, false);
+
+        // Confirm that the user now has a fee to pay
+        assertEq(marketCappedPrice.getFlaunchingFee(_excluded, abi.encode(5000e6)), fee);
     }
 
 }

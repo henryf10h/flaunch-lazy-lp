@@ -12,4 +12,6 @@ interface IFLETH {
 
     function approve(address _spender, uint _amount) external returns (bool);
 
+    function balanceOf(address _owner) external returns (uint);
+
 }

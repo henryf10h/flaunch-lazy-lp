@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
+
 
 interface IInitialPrice {
+
+    function flaunchFeeExemption() external returns (FlaunchFeeExemption);
 
     function getFlaunchingFee(address _sender, bytes calldata _initialPriceParams) external view returns (uint);
 

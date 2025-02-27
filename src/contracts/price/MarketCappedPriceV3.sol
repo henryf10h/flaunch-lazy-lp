@@ -8,6 +8,7 @@ import {IUniswapV3Pool} from '@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 import {FullMath} from '@uniswap/v4-core/src/libraries/FullMath.sol';
 import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
 
 import {IInitialPrice} from '@flaunch-interfaces/IInitialPrice.sol';
@@ -47,17 +48,24 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     IUniswapV3Pool public pool;
     bool public usdcToken0;
 
+    /// The {FlaunchFeeExemption} contract
+    FlaunchFeeExemption public immutable flaunchFeeExemption;
+
     /**
      * Sets the owner of this contract that will be allowed to update the pool.
      *
      * @param _protocolOwner The address of the owner
      * @param _ethToken The ETH token used in the Pool
      * @param _usdcToken The USDC token used in the Pool
+     * @param _flaunchFeeExemption The {FlaunchFeeExemption} contract address
      */
-    constructor (address _protocolOwner, address _ethToken, address _usdcToken) {
+    constructor (address _protocolOwner, address _ethToken, address _usdcToken, address _flaunchFeeExemption) {
         // Set our tokens
         ethToken = _ethToken;
         usdcToken = _usdcToken;
+
+        // Register our {FlaunchFeeExemption}
+        flaunchFeeExemption = FlaunchFeeExemption(_flaunchFeeExemption);
 
         // Grant ownership permissions to the caller
         _initializeOwner(_protocolOwner);
@@ -66,11 +74,17 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     /**
      * Sets a Flaunching fee of 0.1% of the desired market cap.
      *
+     * @param _sender The address flaunching, which may be exluded from flaunching fees
      * @param _initialPriceParams Parameters for the initial pricing
      *
      * @return uint The fee taken from the user for Flaunching a token
      */
-    function getFlaunchingFee(address /* _sender */, bytes calldata _initialPriceParams) public view returns (uint) {
+    function getFlaunchingFee(address _sender, bytes calldata _initialPriceParams) public view returns (uint) {
+        // Check if our `_sender` is fee excluded
+        if (flaunchFeeExemption.feeExcluded(_sender)) {
+            return 0;
+        }
+
         return getMarketCap(_initialPriceParams) / 1000;
     }
 

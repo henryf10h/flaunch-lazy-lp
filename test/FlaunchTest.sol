@@ -13,10 +13,17 @@ import {IPoolManager, PoolManager} from '@uniswap/v4-core/src/PoolManager.sol';
 import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
 import {FairLaunch} from '@flaunch/hooks/FairLaunch.sol';
+import {FastFlaunchZap} from '@flaunch/zaps/FastFlaunchZap.sol';
 import {FeeDistributor} from '@flaunch/hooks/FeeDistributor.sol';
 import {FeeExemptions} from '@flaunch/hooks/FeeExemptions.sol';
 import {Flaunch} from '@flaunch/Flaunch.sol';
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {FlaunchPremineZap} from '@flaunch/zaps/FlaunchPremineZap.sol';
+import {CreateWithManagerZap} from '@flaunch/zaps/CreateWithManagerZap.sol';
+import {FlaunchWhitelistZap} from '@flaunch/zaps/FlaunchWhitelistZap.sol';
+import {MerkleAirdrop} from '@flaunch/creator-tools/MerkleAirdrop.sol';
+import {SnapshotAirdrop} from '@flaunch/creator-tools/SnapshotAirdrop.sol';
+import {FlaunchAirdropZap} from '@flaunch/zaps/FlaunchAirdropZap.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
 import {MemecoinMock} from 'test/mocks/MemecoinMock.sol';
 import {MemecoinTreasury} from '@flaunch/treasury/MemecoinTreasury.sol';
@@ -24,6 +31,9 @@ import {PoolSwap} from '@flaunch/zaps/PoolSwap.sol';
 import {ReferralEscrow} from '@flaunch/referrals/ReferralEscrow.sol';
 import {StaticFeeCalculator} from '@flaunch/fees/StaticFeeCalculator.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
+import {TreasuryManagerFactory} from '@flaunch/treasury/managers/TreasuryManagerFactory.sol';
+import {WhitelistFairLaunch} from '@flaunch/subscribers/WhitelistFairLaunch.sol';
+import {WhitelistPoolSwap} from '@flaunch/zaps/WhitelistPoolSwap.sol';
 
 import {PositionManagerMock} from './mocks/PositionManagerMock.sol';
 import {WETH9} from './tokens/WETH9.sol';
@@ -51,12 +61,24 @@ contract FlaunchTest is Deployers {
     InitialPrice internal initialPrice;
     PoolManager internal poolManager;
     FairLaunch internal fairLaunch;
+    FlaunchAirdropZap internal flaunchAirdropZap;
+    MerkleAirdrop internal merkleAirdrop;
+    SnapshotAirdrop internal snapshotAirdrop;
     PoolModifyLiquidityTest internal poolModifyPosition;
     PoolSwap internal poolSwap;
     PositionManagerMock internal positionManager;
     FeeExemptions internal feeExemptions;
-    FlaunchPremineZap premineZap;
-    ReferralEscrow referralEscrow;
+    FastFlaunchZap internal fastFlaunchZap;
+    FlaunchPremineZap internal premineZap;
+    CreateWithManagerZap internal createWithManagerZap;
+    ReferralEscrow internal referralEscrow;
+    TreasuryManagerFactory internal treasuryManagerFactory;
+
+    FlaunchWhitelistZap internal flaunchWhitelistZap;
+    WhitelistFairLaunch internal whitelistFairLaunch;
+    WhitelistPoolSwap internal whitelistPoolSwap;
+
+    FlaunchFeeExemption internal flaunchFeeExemption;
 
     /// Store our deployer address
     address public constant DEPLOYER = 0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496;
@@ -98,8 +120,11 @@ contract FlaunchTest is Deployers {
             flipped: FL_SQRT_PRICE_2_1
         });
 
+        // Deploy our flaunch fee exclusion
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
         // Deploy our InitialPrice contract
-        initialPrice = new InitialPrice(0, address(this));
+        initialPrice = new InitialPrice(0, address(this), address(flaunchFeeExemption));
         initialPrice.setSqrtPriceX96(initialSqrtPriceX96);
 
         // Deploy our FeeExemptions contract
@@ -129,12 +154,25 @@ contract FlaunchTest is Deployers {
         positionManager.setFeeCalculator(feeCalculator);
 
         premineZap = new FlaunchPremineZap(positionManager, address(flaunch), address(flETH), poolSwap);
+        fastFlaunchZap = new FastFlaunchZap(positionManager);
 
         fairLaunch = positionManager.fairLaunch();
 
         referralEscrow = new ReferralEscrow(address(flETH), address(positionManager));
         referralEscrow.setPoolSwap(address(poolSwap));
         positionManager.setReferralEscrow(payable(address(referralEscrow)));
+
+        treasuryManagerFactory = new TreasuryManagerFactory(address(this));
+
+        merkleAirdrop = new MerkleAirdrop(address(flETH), address(treasuryManagerFactory));
+        snapshotAirdrop = new SnapshotAirdrop(address(flETH), address(treasuryManagerFactory), address(positionManager));
+        flaunchAirdropZap = new FlaunchAirdropZap(payable(address(premineZap)), payable(address(merkleAirdrop)));
+        createWithManagerZap = new CreateWithManagerZap(positionManager, address(flaunch), address(flETH), poolSwap, address(treasuryManagerFactory));
+
+        // Deploy and configure our Whitelist logic
+        whitelistFairLaunch = new WhitelistFairLaunch(address(positionManager.notifier()), address(fairLaunch));
+        whitelistPoolSwap = new WhitelistPoolSwap(poolManager, address(whitelistFairLaunch));
+        flaunchWhitelistZap = new FlaunchWhitelistZap(payable(address(positionManager)), payable(address(premineZap)), address(whitelistFairLaunch));
     }
 
     /**

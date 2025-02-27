@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
 
 import {FlaunchTest} from '../FlaunchTest.sol';
@@ -14,8 +15,11 @@ contract InitialPriceTest is FlaunchTest {
     address nonOwner = address(0x456);
 
     function setUp() public {
+        // Deploy our {FlaunchFeeExemption} contract
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
         // Deploy contract and set `owner` as the protocol owner
-        initialPrice = new InitialPrice(0, owner);
+        initialPrice = new InitialPrice(0, owner, address(flaunchFeeExemption));
     }
 
     // Test that the owner is set correctly upon initialization
@@ -25,13 +29,13 @@ contract InitialPriceTest is FlaunchTest {
 
     function test_CanSetFlaunchingFee(uint _fee, address _sender) public {
         // Deploy a contract setting the fee
-        initialPrice = new InitialPrice(_fee, owner);
+        initialPrice = new InitialPrice(_fee, owner, address(flaunchFeeExemption));
         assertEq(initialPrice.getFlaunchingFee(_sender, abi.encode('')), _fee);
     }
 
     function test_CanGetMarketCap() public {
         // Deploy a contract setting the fee
-        initialPrice = new InitialPrice(0.001 ether, owner);
+        initialPrice = new InitialPrice(0.001 ether, owner, address(flaunchFeeExemption));
 
         // Set a market cap tick that is roughly equal to 2e18 : 100e27
         vm.prank(owner);
@@ -116,4 +120,34 @@ contract InitialPriceTest is FlaunchTest {
         assertEq(initialPrice.getSqrtPriceX96(address(this), false, abi.encode('')), type(uint160).max, 'Unflipped price should be max uint160');
         assertEq(initialPrice.getSqrtPriceX96(address(this), true, abi.encode('')), 0, 'Flipped price should be 0');
     }
+
+    function test_CanExcludeFlaunchFee(address _excluded, address _notExcluded) public {
+        // Confirm that our addresses are not the same
+        vm.assume(_excluded != _notExcluded);
+
+        // Redeploy our {FlaunchFeeExemption} contract due to fork
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
+        // Set some constants for testing
+        uint fee = 0.001597265310561477 ether;
+
+        // Set the pool to allow for flaunching fee calculation
+        initialPrice = new InitialPrice(fee, owner, address(flaunchFeeExemption));
+
+        // Set a fee exclusion for an address
+        initialPrice.flaunchFeeExemption().setFeeExemption(_excluded, true);
+
+        // Confirm that the flaunch fee is now zero
+        assertEq(initialPrice.getFlaunchingFee(_excluded, abi.encode('')), 0);
+
+        // Confirm that the other address still has a fee
+        assertEq(initialPrice.getFlaunchingFee(_notExcluded, abi.encode('')), fee);
+
+        // Update the fee exclusion
+        initialPrice.flaunchFeeExemption().setFeeExemption(_excluded, false);
+
+        // Confirm that the user now has a fee to pay
+        assertEq(initialPrice.getFlaunchingFee(_excluded, abi.encode('')), fee);
+    }
+
 }

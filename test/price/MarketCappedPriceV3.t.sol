@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {MarketCappedPriceV3} from '@flaunch/price/MarketCappedPriceV3.sol';
 
 import {FlaunchTest} from '../FlaunchTest.sol';
@@ -13,13 +14,16 @@ contract MarketCappedPriceV3Test is FlaunchTest {
     address internal constant ETH_TOKEN = 0x4200000000000000000000000000000000000006;
     address internal constant USDC_TOKEN = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
-    MarketCappedPriceV3 marketCappedPrice;
+    MarketCappedPriceV3 internal marketCappedPrice;
 
     address pool;
 
     function setUp() public {
+        // Deploy our {FlaunchFeeExemption} contract
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
         // Deploy the MarketCappedPrice contract
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Map our Base Uniswap V3 ETH:USDC pool for any fork tests
         pool = 0xd0b53D9277642d899DF5C87A3966A349A798F224;
@@ -32,7 +36,7 @@ contract MarketCappedPriceV3Test is FlaunchTest {
 
     function test_CanSetPool() public forkBaseBlock(25677808) {
         // As we have forked, we need to make a fresh deployment
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Test the owner can set the pool
         marketCappedPrice.setPool(pool);
@@ -43,7 +47,7 @@ contract MarketCappedPriceV3Test is FlaunchTest {
 
     function test_CannotSetPoolWithInvalidTokenPair() public forkBaseBlock(25677808) {
         // As we have forked, we need to make a fresh deployment
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // ETH / TOSHI
         vm.expectRevert(MarketCappedPriceV3.InvalidTokenPair.selector);
@@ -60,7 +64,7 @@ contract MarketCappedPriceV3Test is FlaunchTest {
 
     function test_CanGetMarketCap() public forkBaseBlock(25677808) {
         // As we have forked, we need to make a fresh deployment
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Set our pool
         marketCappedPrice.setPool(pool);
@@ -72,7 +76,7 @@ contract MarketCappedPriceV3Test is FlaunchTest {
 
     function test_CanGetLivePool() public forkBaseBlock(25677808) {
         // As we have forked, we need to make a fresh deployment
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Initial market cap
 
@@ -95,7 +99,7 @@ contract MarketCappedPriceV3Test is FlaunchTest {
 
     function test_CanGetPercentageBasedFlaunchingFee() public forkBaseBlock(25677808) {
         // As we have forked, we need to make a fresh deployment
-        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN);
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
 
         // Set our pool
         marketCappedPrice.setPool(pool);
@@ -117,6 +121,36 @@ contract MarketCappedPriceV3Test is FlaunchTest {
         ));
 
         marketCappedPrice.getSqrtPriceX96(address(this), false, abi.encode(_marketCap));
+    }
+
+    function test_CanExcludeFlaunchFee(address _excluded, address _notExcluded) public forkBaseBlock(25677808) {
+        // Confirm that our addresses are not the same
+        vm.assume(_excluded != _notExcluded);
+
+        // Redeploy our {FlaunchFeeExemption} contract due to fork
+        flaunchFeeExemption = new FlaunchFeeExemption();
+
+        // Set the pool to allow for flaunching fee calculation
+        marketCappedPrice = new MarketCappedPriceV3(owner, ETH_TOKEN, USDC_TOKEN, address(flaunchFeeExemption));
+        marketCappedPrice.setPool(pool);
+
+        // Set some constants for testing
+        uint fee = 0.001597265310561477 ether;
+
+        // Set a fee exclusion for an address
+        marketCappedPrice.flaunchFeeExemption().setFeeExemption(_excluded, true);
+
+        // Confirm that the flaunch fee is now zero
+        assertEq(marketCappedPrice.getFlaunchingFee(_excluded, abi.encode(5000e6)), 0);
+
+        // Confirm that the other address still has a fee
+        assertEq(marketCappedPrice.getFlaunchingFee(_notExcluded, abi.encode(5000e6)), fee);
+
+        // Update the fee exclusion
+        marketCappedPrice.flaunchFeeExemption().setFeeExemption(_excluded, false);
+
+        // Confirm that the user now has a fee to pay
+        assertEq(marketCappedPrice.getFlaunchingFee(_excluded, abi.encode(5000e6)), fee);
     }
 
 }

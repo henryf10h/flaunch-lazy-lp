@@ -5,6 +5,7 @@ import {Ownable} from '@solady/auth/Ownable.sol';
 
 import {FullMath} from '@uniswap/v4-core/src/libraries/FullMath.sol';
 
+import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
 
 import {IInitialPrice} from '@flaunch-interfaces/IInitialPrice.sol';
@@ -30,13 +31,22 @@ contract InitialPrice is IInitialPrice, Ownable {
     /// Our static flaunching fee
     uint internal immutable flaunchFee;
 
+    /// The {FlaunchFeeExemption} contract
+    FlaunchFeeExemption public immutable flaunchFeeExemption;
+
     /**
      * Sets the owner of this contract that will be allowed to update the `_initialSqrtPriceX96`.
      *
+     * @param _flaunchFee The fee to pay when flaunching in ETH
      * @param _protocolOwner The address of the owner
+     * @param _flaunchFeeExemption The {FlaunchFeeExemption} contract address
      */
-    constructor (uint _flaunchFee, address _protocolOwner) {
+    constructor (uint _flaunchFee, address _protocolOwner, address _flaunchFeeExemption) {
+        // Set our flaunch fee
         flaunchFee = _flaunchFee;
+
+        // Register our {FlaunchFeeExemption}
+        flaunchFeeExemption = FlaunchFeeExemption(_flaunchFeeExemption);
 
         // Grant ownership permissions to the caller
         _initializeOwner(_protocolOwner);
@@ -45,9 +55,16 @@ contract InitialPrice is IInitialPrice, Ownable {
     /**
      * Sets a flat Flaunching fee of 1 finney.
      *
+     * @param _sender The address flaunching, which may be exluded from flaunching fees
+     *
      * @return uint The fee taken from the user for Flaunching a token
      */
-    function getFlaunchingFee(address /* _sender */, bytes calldata /* _initialPriceParams */) public view returns (uint) {
+    function getFlaunchingFee(address _sender, bytes calldata /* _initialPriceParams */) public view returns (uint) {
+        // Check if our `_sender` is fee excluded
+        if (flaunchFeeExemption.feeExcluded(_sender)) {
+            return 0;
+        }
+
         return flaunchFee;
     }
 

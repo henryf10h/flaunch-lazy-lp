@@ -59,7 +59,7 @@ contract PoolSwap is IUnlockCallback {
      *
      * @return The BalanceDelta of the swap
      */
-    function swap(PoolKey memory _key, IPoolManager.SwapParams memory _params) public payable returns (BalanceDelta) {
+    function swap(PoolKey memory _key, IPoolManager.SwapParams memory _params) public payable virtual returns (BalanceDelta) {
         return swap(_key, _params, address(0));
     }
 
@@ -72,7 +72,7 @@ contract PoolSwap is IUnlockCallback {
      *
      * @return delta_ The BalanceDelta of the swap
      */
-    function swap(PoolKey memory _key, IPoolManager.SwapParams memory _params, address _referrer) public payable returns (BalanceDelta delta_) {
+    function swap(PoolKey memory _key, IPoolManager.SwapParams memory _params, address _referrer) public payable virtual returns (BalanceDelta delta_) {
         delta_ = abi.decode(
             manager.unlock(abi.encode(CallbackData(msg.sender, _key, _params, _referrer))),
             (BalanceDelta)

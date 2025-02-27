@@ -34,7 +34,7 @@ contract FairLaunchTest is FlaunchTest {
     uint FAIR_LAUNCH_WINDOW;
 
     address MEMECOIN_UNFLIPPED = 0xF2C9428E4C5657e1Ea0c45C3ffD227025CA05f00;
-    address MEMECOIN_FLIPPED = 0x25BA8AD9298eEB7ABc41D7EF6003101a11E2ae41;
+    address MEMECOIN_FLIPPED = 0x17d13f731b5e9331b43db0515a4F586dFD1Dc5ba;
 
     constructor () {
         // Deploy our platform
