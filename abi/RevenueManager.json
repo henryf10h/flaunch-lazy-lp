@@ -272,6 +272,25 @@
     },
     {
       "type": "function",
+      "name": "tokenTimelock",
+      "inputs": [
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_unlockedAt",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "transferOwnership",
       "inputs": [
         {
@@ -405,6 +424,49 @@
     },
     {
       "type": "event",
+      "name": "RevenueClaimed",
+      "inputs": [
+        {
+          "name": "_creator",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "_creatorAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "_creatorSuccess",
+          "type": "bool",
+          "indexed": false,
+          "internalType": "bool"
+        },
+        {
+          "name": "_protocol",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "_protocolAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "_protocolSuccess",
+          "type": "bool",
+          "indexed": false,
+          "internalType": "bool"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "TreasuryEscrowed",
       "inputs": [
         {
@@ -454,6 +516,25 @@
       "anonymous": false
     },
     {
+      "type": "event",
+      "name": "TreasuryTimelocked",
+      "inputs": [
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "_unlockedAt",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
       "type": "error",
       "name": "AlreadyInitialized",
       "inputs": []
@@ -484,6 +565,17 @@
       "inputs": [
         {
           "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "TokenTimelocked",
+      "inputs": [
+        {
+          "name": "_unlockedAt",
           "type": "uint256",
           "internalType": "uint256"
         }

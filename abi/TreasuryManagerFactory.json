@@ -175,19 +175,6 @@
     },
     {
       "type": "event",
-      "name": "ManagerApproved",
-      "inputs": [
-        {
-          "name": "_manager",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
       "name": "ManagerDeployed",
       "inputs": [
         {
@@ -207,10 +194,23 @@
     },
     {
       "type": "event",
-      "name": "ManagerUnapproved",
+      "name": "ManagerImplementationApproved",
       "inputs": [
         {
-          "name": "_manager",
+          "name": "_managerImplementation",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ManagerImplementationUnapproved",
+      "inputs": [
+        {
+          "name": "_managerImplementation",
           "type": "address",
           "indexed": true,
           "internalType": "address"

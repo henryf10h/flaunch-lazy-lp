@@ -12,6 +12,11 @@
           "name": "_treasuryManagerFactory",
           "type": "address",
           "internalType": "address"
+        },
+        {
+          "name": "_positionManager",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "stateMutability": "nonpayable"
@@ -25,14 +30,14 @@
       "name": "addAirdrop",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
         {
-          "name": "_airdropIndex",
-          "type": "uint256",
-          "internalType": "uint256"
+          "name": "_creator",
+          "type": "address",
+          "internalType": "address"
         },
         {
           "name": "_token",
@@ -48,19 +53,15 @@
           "name": "_airdropEndTime",
           "type": "uint256",
           "internalType": "uint256"
-        },
-        {
-          "name": "_merkleRoot",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        },
-        {
-          "name": "_merkleDataIPFSHash",
-          "type": "string",
-          "internalType": "string"
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "name": "airdropIndex",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
       "stateMutability": "payable"
     },
     {
@@ -68,7 +69,7 @@
       "name": "airdropData",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
@@ -82,12 +83,32 @@
         {
           "name": "",
           "type": "tuple",
-          "internalType": "struct IMerkleAirdrop.AirdropData",
+          "internalType": "struct ISnapshotAirdrop.AirdropData",
           "components": [
+            {
+              "name": "creator",
+              "type": "address",
+              "internalType": "address"
+            },
             {
               "name": "token",
               "type": "address",
               "internalType": "address"
+            },
+            {
+              "name": "totalTokensToAirdrop",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "memecoinHoldersTimestamp",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "eligibleSupplySnapshot",
+              "type": "uint256",
+              "internalType": "uint256"
             },
             {
               "name": "airdropEndTime",
@@ -98,16 +119,6 @@
               "name": "amountLeft",
               "type": "uint256",
               "internalType": "uint256"
-            },
-            {
-              "name": "merkleRoot",
-              "type": "bytes32",
-              "internalType": "bytes32"
-            },
-            {
-              "name": "merkleDataIPFSHash",
-              "type": "string",
-              "internalType": "string"
             }
           ]
         }
@@ -119,7 +130,7 @@
       "name": "airdropsCount",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         }
@@ -142,10 +153,10 @@
     },
     {
       "type": "function",
-      "name": "claim",
+      "name": "checkAirdropEligibility",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
@@ -155,14 +166,51 @@
           "internalType": "uint256"
         },
         {
-          "name": "_amount",
+          "name": "_user",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "claimableAmount",
           "type": "uint256",
           "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "claim",
+      "inputs": [
+        {
+          "name": "_memecoin",
+          "type": "address",
+          "internalType": "address"
         },
         {
-          "name": "_merkleProof",
-          "type": "bytes32[]",
-          "internalType": "bytes32[]"
+          "name": "_airdropIndex",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "claimMultiple",
+      "inputs": [
+        {
+          "name": "_memecoins",
+          "type": "address[]",
+          "internalType": "address[]"
+        },
+        {
+          "name": "_airdropIndices",
+          "type": "uint256[]",
+          "internalType": "uint256[]"
         }
       ],
       "outputs": [],
@@ -185,6 +233,11 @@
       "type": "function",
       "name": "creatorWithdraw",
       "inputs": [
+        {
+          "name": "_memecoin",
+          "type": "address",
+          "internalType": "address"
+        },
         {
           "name": "_airdropIndex",
           "type": "uint256",
@@ -231,7 +284,7 @@
       "name": "isAirdropActive",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
@@ -255,7 +308,7 @@
       "name": "isAirdropClaimed",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
@@ -287,45 +340,6 @@
           "name": "_contract",
           "type": "address",
           "internalType": "address"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "",
-          "type": "bool",
-          "internalType": "bool"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
-      "name": "isPartOfMerkleTree",
-      "inputs": [
-        {
-          "name": "_creator",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "_airdropIndex",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "_user",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "_amount",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "_merkleProof",
-          "type": "bytes32[]",
-          "internalType": "bytes32[]"
         }
       ],
       "outputs": [
@@ -371,6 +385,19 @@
     },
     {
       "type": "function",
+      "name": "positionManager",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract PositionManager"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "proxyClaim",
       "inputs": [
         {
@@ -379,7 +406,7 @@
           "internalType": "address"
         },
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "internalType": "address"
         },
@@ -387,16 +414,6 @@
           "name": "_airdropIndex",
           "type": "uint256",
           "internalType": "uint256"
-        },
-        {
-          "name": "_amount",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "_merkleProof",
-          "type": "bytes32[]",
-          "internalType": "bytes32[]"
         }
       ],
       "outputs": [],
@@ -471,7 +488,7 @@
           "internalType": "address"
         },
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "indexed": true,
           "internalType": "address"
@@ -528,7 +545,7 @@
       "name": "CreatorWithdraw",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "indexed": true,
           "internalType": "address"
@@ -540,7 +557,13 @@
           "internalType": "uint256"
         },
         {
-          "name": "_tokenWithdrawn",
+          "name": "_creator",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "_token",
           "type": "address",
           "indexed": false,
           "internalType": "address"
@@ -559,7 +582,7 @@
       "name": "NewAirdrop",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_memecoin",
           "type": "address",
           "indexed": true,
           "internalType": "address"
@@ -571,22 +594,47 @@
           "internalType": "uint256"
         },
         {
-          "name": "_token",
-          "type": "address",
+          "name": "_airdropData",
+          "type": "tuple",
           "indexed": false,
-          "internalType": "address"
-        },
-        {
-          "name": "_amount",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "_airdropEndTime",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
+          "internalType": "struct ISnapshotAirdrop.AirdropData",
+          "components": [
+            {
+              "name": "creator",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "token",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "totalTokensToAirdrop",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "memecoinHoldersTimestamp",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "eligibleSupplySnapshot",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "airdropEndTime",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "amountLeft",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         }
       ],
       "anonymous": false
@@ -643,11 +691,6 @@
     },
     {
       "type": "error",
-      "name": "AirdropAlreadyExists",
-      "inputs": []
-    },
-    {
-      "type": "error",
       "name": "AirdropEnded",
       "inputs": []
     },
@@ -673,7 +716,17 @@
     },
     {
       "type": "error",
+      "name": "CallerIsNotCreator",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "ETHSentForTokenAirdrop",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "IndexLengthMismatch",
       "inputs": []
     },
     {
@@ -683,12 +736,7 @@
     },
     {
       "type": "error",
-      "name": "InvalidAirdropIndex",
-      "inputs": []
-    },
-    {
-      "type": "error",
-      "name": "MerkleVerificationFailed",
+      "name": "InvalidMemecoin",
       "inputs": []
     },
     {
@@ -704,6 +752,11 @@
     {
       "type": "error",
       "name": "NotApprovedAirdropCreator",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "NotEligible",
       "inputs": []
     },
     {

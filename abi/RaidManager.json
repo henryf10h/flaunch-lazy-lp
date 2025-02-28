@@ -91,7 +91,20 @@
         {
           "name": "",
           "type": "address",
-          "internalType": "contract IMerkleAirdrop"
+          "internalType": "contract ISnapshotAirdrop"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "airdropIndex",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
         }
       ],
       "stateMutability": "view"
@@ -106,23 +119,7 @@
     {
       "type": "function",
       "name": "claim",
-      "inputs": [
-        {
-          "name": "_airdropIndex",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "_merkleRoot",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        },
-        {
-          "name": "_merkleDataIPFSHash",
-          "type": "string",
-          "internalType": "string"
-        }
-      ],
+      "inputs": [],
       "outputs": [],
       "stateMutability": "nonpayable"
     },
@@ -197,29 +194,36 @@
       "inputs": [],
       "outputs": [
         {
-          "name": "currency0",
-          "type": "address",
-          "internalType": "Currency"
-        },
-        {
-          "name": "currency1",
-          "type": "address",
-          "internalType": "Currency"
-        },
-        {
-          "name": "fee",
-          "type": "uint24",
-          "internalType": "uint24"
-        },
-        {
-          "name": "tickSpacing",
-          "type": "int24",
-          "internalType": "int24"
-        },
-        {
-          "name": "hooks",
-          "type": "address",
-          "internalType": "contract IHooks"
+          "name": "",
+          "type": "tuple",
+          "internalType": "struct PoolKey",
+          "components": [
+            {
+              "name": "currency0",
+              "type": "address",
+              "internalType": "Currency"
+            },
+            {
+              "name": "currency1",
+              "type": "address",
+              "internalType": "Currency"
+            },
+            {
+              "name": "fee",
+              "type": "uint24",
+              "internalType": "uint24"
+            },
+            {
+              "name": "tickSpacing",
+              "type": "int24",
+              "internalType": "int24"
+            },
+            {
+              "name": "hooks",
+              "type": "address",
+              "internalType": "contract IHooks"
+            }
+          ]
         }
       ],
       "stateMutability": "view"
@@ -353,13 +357,7 @@
     {
       "type": "function",
       "name": "recoverAirdrop",
-      "inputs": [
-        {
-          "name": "_airdropIndex",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
+      "inputs": [],
       "outputs": [],
       "stateMutability": "nonpayable"
     },
@@ -529,18 +527,6 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
-        },
-        {
-          "name": "_merkleRoot",
-          "type": "bytes32",
-          "indexed": false,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "_merkleDataIPFSHash",
-          "type": "string",
-          "indexed": false,
-          "internalType": "string"
         }
       ],
       "anonymous": false

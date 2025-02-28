@@ -22,6 +22,11 @@
           "name": "_usdcToken",
           "type": "address",
           "internalType": "address"
+        },
+        {
+          "name": "_flaunchFeeExemption",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "stateMutability": "nonpayable"
@@ -74,10 +79,23 @@
     },
     {
       "type": "function",
+      "name": "flaunchFeeExemption",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract FlaunchFeeExemption"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "getFlaunchingFee",
       "inputs": [
         {
-          "name": "",
+          "name": "_sender",
           "type": "address",
           "internalType": "address"
         },
