@@ -2,23 +2,22 @@
 pragma solidity ^0.8.26;
 
 import {Flaunch} from '@flaunch/Flaunch.sol';
-import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
+import {SingleTokenManager} from '@flaunch/treasury/managers/SingleTokenManager.sol';
 
 
 /**
  * Acts as a middleware for revenue claims, allowing external protocols to build on top of Flaunch
  * and be able to have more granular control over the revenue yielded.
  */
-contract RevenueManager is TreasuryManager {
+contract RevenueManager is SingleTokenManager {
 
     error InvalidCreatorAddress();
     error InvalidProtocolFee();
-    error TokenIdAlreadySet(uint _tokenId);
 
     event CreatorUpdated(address _creator);
     event ProtocolRecipientUpdated(address _protocolRecipient);
     event ProtocolFeeUpdated(uint _protocolFee);
-    event ManagerInitialized(uint _tokenId, InitializeParams _params);
+    event ManagerInitialized(address indexed _flaunch, uint indexed _tokenId, InitializeParams _params);
     event RevenueClaimed(address _creator, uint _creatorAmount, bool _creatorSuccess, address _protocol, uint _protocolAmount, bool _protocolSuccess);
 
     /**
@@ -37,9 +36,6 @@ contract RevenueManager is TreasuryManager {
     /// The maximum value of a protocol fee
     uint internal constant MAX_PROTOCOL_FEE = 100_00;
 
-    /// The {Flaunch} token ID stored in the contract
-    uint public tokenId;
-
     /// The end-owner creator of the token
     address payable public creator;
 
@@ -56,9 +52,9 @@ contract RevenueManager is TreasuryManager {
     /**
      * Sets up the contract with the initial required contract addresses.
      *
-     * @param _flaunch The {Flaunch} ERC721 contract address
+     * @param _treasuryManagerFactory The {TreasuryManagerFactory} that will launch this implementation
      */
-    constructor (address _flaunch) TreasuryManager(_flaunch) {
+    constructor (address _treasuryManagerFactory) SingleTokenManager(_treasuryManagerFactory) {
         // ..
     }
 
@@ -67,18 +63,10 @@ contract RevenueManager is TreasuryManager {
      * registered to the manager. We also set our initial configurations, though the majority
      * of these can be updated by the owner at a later date.
      *
-     * @param _tokenId The Flaunch tokenId that is being managed
+     * @param _flaunchToken The Flaunch token that is being deposited
      * @param _data Onboarding variables
      */
-    function _initialize(uint _tokenId, bytes calldata _data) internal override {
-        // Confirm that we only have one tokenId assigned to the escrow
-        if (tokenId != 0) {
-            revert TokenIdAlreadySet(tokenId);
-        }
-
-        // Assign the tokenId to the manager
-        tokenId = _tokenId;
-
+    function _initialize(FlaunchToken calldata _flaunchToken, bytes calldata _data) internal override depositSingleToken(_flaunchToken) {
         // Unpack our initial manager settings
         (InitializeParams memory params) = abi.decode(_data, (InitializeParams));
 
@@ -95,7 +83,7 @@ contract RevenueManager is TreasuryManager {
         if (params.protocolFee > MAX_PROTOCOL_FEE) revert InvalidProtocolFee();
         protocolFee = params.protocolFee;
 
-        emit ManagerInitialized(_tokenId, params);
+        emit ManagerInitialized(address(flaunchToken.flaunch), flaunchToken.tokenId, params);
     }
 
     /**
@@ -106,9 +94,9 @@ contract RevenueManager is TreasuryManager {
      * @return creatorAmount_ The amount received by the end-owner
      * @return protocolAmount_ The amount received by the protocol
      */
-    function claim() public returns (uint creatorAmount_, uint protocolAmount_) {
+    function claim() public tokenExists returns (uint creatorAmount_, uint protocolAmount_) {
         // Withdraw fees earned from the ERC721, unwrapping into ETH
-        flaunch.positionManager().withdrawFees(address(this), true);
+        flaunchToken.flaunch.positionManager().withdrawFees(address(this), true);
 
         // Discover the balance held following our fee withdrawal. We don't just want to include
         // the fees withdrawn, but also any other ETH resting in the manager.
@@ -153,7 +141,7 @@ contract RevenueManager is TreasuryManager {
      *
      * @param _protocolRecipient The new protocol recipient address
      */
-    function setProtocolRecipient(address payable _protocolRecipient) public onlyOwner {
+    function setProtocolRecipient(address payable _protocolRecipient) public onlyManagerOwner {
         protocolRecipient = _protocolRecipient;
         emit ProtocolRecipientUpdated(_protocolRecipient);
     }
@@ -165,7 +153,7 @@ contract RevenueManager is TreasuryManager {
      *
      * @param _creator The new end-owner creator address
      */
-    function setCreator(address payable _creator) public onlyOwner {
+    function setCreator(address payable _creator) public onlyManagerOwner {
         if (_creator == address(0)) {
             revert InvalidCreatorAddress();
         }
@@ -173,7 +161,6 @@ contract RevenueManager is TreasuryManager {
         creator = _creator;
         emit CreatorUpdated(_creator);
     }
-
 
     /**
      * Allows the protocol recipient to be updated. This percentage value is accurate to 2dp
@@ -183,7 +170,7 @@ contract RevenueManager is TreasuryManager {
      *
      * @param _protocolFee The new protocol fee
      */
-    function setProtocolFee(uint _protocolFee) public onlyOwner {
+    function setProtocolFee(uint _protocolFee) public onlyManagerOwner {
         // Ensure that the protocol fee is not greater than 100%
         if (_protocolFee > MAX_PROTOCOL_FEE) {
             revert InvalidProtocolFee();

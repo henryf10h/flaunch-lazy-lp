@@ -8,7 +8,7 @@ import {PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
 import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
-import {FlaunchWhitelistZap} from '@flaunch/zaps/FlaunchWhitelistZap.sol';
+import {FlaunchZap} from '@flaunch/zaps/FlaunchZap.sol';
 import {Notifier} from '@flaunch/hooks/Notifier.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
 import {WhitelistFairLaunch} from '@flaunch/subscribers/WhitelistFairLaunch.sol';
@@ -82,54 +82,37 @@ contract WhitelistFairLaunchTest is FlaunchTest {
     }
 
     /**
-     * FlaunchWhitelistZap
+     * FlaunchZap
      */
 
-    function test_FlaunchWhitelistZap_CanFlaunch_WithWhitelist() public withSubscriber {
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+    function test_FlaunchZap_CanFlaunch_WithWhitelist() public withSubscriber {
+        _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
     }
 
-    function test_FlaunchWhitelistZap_CanFlaunch_WithWhitelist_AndRefundOverpay() public withSubscriber {
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-
+    function test_FlaunchZap_CanFlaunch_WithWhitelist_AndRefundOverpay() public withSubscriber {
         // Deal enough ETH to overpay
         deal(address(this), 1 ether);
 
         // Flaunch a whitelist pool
-        (address memecoin,) = flaunchWhitelistZap.flaunch{value: 1 ether}({
-            _params: PositionManager.FlaunchParams({
-                name: 'Token',
-                symbol: 'TKN',
-                tokenUri: VALID_MERKLE_IPFS,
-                initialTokenFairLaunch: INITIAL_TOKEN_FAIR_LAUNCH,
-                premineAmount: 0,
-                creator: address(this),
-                creatorFeeAllocation: 20_00,
-                flaunchAt: block.timestamp,
-                initialPriceParams: abi.encode(5000e6),
-                feeCalculatorParams: abi.encode(1000)
-            }),
-            _merkleRoot: VALID_MERKLE_ROOT,
-            _merkleDataIPFSHash: VALID_MERKLE_IPFS,
-            _whitelistMaxTokens: 0
-        });
+        _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 1 ether);
 
-        positionManager.poolKey(memecoin);
+        assertEq(payable(address(this)).balance, 1 ether);
     }
 
-    function test_FlaunchWhitelistZap_CanFlaunch_WithoutWhitelist() public withSubscriber {
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        _flaunchToken('', VALID_MERKLE_IPFS);
+    function test_FlaunchZap_CanFlaunch_WithoutWhitelist() public withSubscriber {
+        _flaunchToken('', VALID_MERKLE_IPFS, 0, 0);
     }
 
-    function test_FlaunchWhitelistZap_CannotFlaunch_WithoutZapApproved() public withSubscriber {
+    function test_FlaunchZap_CannotFlaunch_WithoutZapApproved() public withSubscriber {
+        // Unapprove our zap
+        whitelistFairLaunch.setWhitelistZap(address(flaunchZap), false);
+
         // Revert if merkle root specified
         vm.expectRevert(WhitelistFairLaunch.CallerNotWhitelistZap.selector);
-        _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         // Not an issue if no merkle root specified
-        _flaunchToken('', VALID_MERKLE_IPFS);
+        _flaunchToken('', VALID_MERKLE_IPFS, 0, 0);
     }
 
     /**
@@ -138,8 +121,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_PoolSwap_CannotSwap_Whitelist_InFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 1 ether, 0);
 
         vm.startPrank(WHITELISTED_USER);
 
@@ -164,8 +146,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_PoolSwap_CanSwap_Whitelist_AfterFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         vm.warp(block.timestamp + 30 days);
 
@@ -182,8 +163,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_PoolSwap_CannotOverBuy_Whitelist_InFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         // Update our swap parameters to increase the buy amount. This will buy out the
         // Fair Launch token allocation.
@@ -216,7 +196,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanSwap_NonWhitelist_InFairLaunch() public withSubscriber {
         // Flaunch a token that is not whitelisted
-        PoolKey memory poolKey = _flaunchToken('', VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken('', VALID_MERKLE_IPFS, 0, 0);
 
         // Action a swap that hits a non-whitelist token during fair launch
         whitelistPoolSwap.swap({
@@ -228,7 +208,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanSwap_NonWhitelist_AfterFairLaunch() public withSubscriber {
         // Flaunch a token that is not whitelisted
-        PoolKey memory poolKey = _flaunchToken('', VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken('', VALID_MERKLE_IPFS, 0, 0);
 
         vm.warp(block.timestamp + 30 days);
 
@@ -242,8 +222,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanSwap_Whitelist_InFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         vm.startPrank(WHITELISTED_USER);
 
@@ -259,8 +238,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanSwap_Whitelist_AfterFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         vm.warp(block.timestamp + 30 days);
 
@@ -278,8 +256,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CannotSwap_Whitelist_InFairLaunch_IfNotSetInSubscriber() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         // Remove the WhitelistPoolSwap contract so that it no longer has permissions to
         // make whitelist swaps.
@@ -309,8 +286,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanSwap_Whitelist_AfterFairLaunch_IfNotSetInSubscriber() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         vm.warp(block.timestamp + 30 days);
 
@@ -332,8 +308,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CanOverBuy_Whitelist_InFairLaunch() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         // Update our swap parameters to increase the buy amount. This will buy out the
         // Fair Launch token allocation.
@@ -353,8 +328,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
 
     function test_WhitelistPoolSwap_CannotSwap_Whitelist_InFairLaunch_WithInvalidProof() public withSubscriber {
         // Flaunch a token that is whitelisted
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, 0, 0);
 
         vm.startPrank(WHITELISTED_USER);
 
@@ -381,30 +355,8 @@ contract WhitelistFairLaunchTest is FlaunchTest {
         vm.assume(_swap2 > INITIAL_TOKEN_FAIR_LAUNCH / 2);
         vm.assume(_swap2 < INITIAL_TOKEN_FAIR_LAUNCH);
 
-        // Whitelist our zap
-        whitelistFairLaunch.setWhitelistZap(address(flaunchWhitelistZap), true);
-
         // Flaunch a token that is whitelisted, with a max token allocation of 50% of the fair launch
-        (address memecoin,) = flaunchWhitelistZap.flaunch({
-            _params: PositionManager.FlaunchParams({
-                name: 'Token',
-                symbol: 'TKN',
-                tokenUri: VALID_MERKLE_IPFS,
-                initialTokenFairLaunch: INITIAL_TOKEN_FAIR_LAUNCH,
-                premineAmount: 0,
-                creator: address(this),
-                creatorFeeAllocation: 20_00,
-                flaunchAt: block.timestamp,
-                initialPriceParams: abi.encode(5000e6),
-                feeCalculatorParams: abi.encode(1000)
-            }),
-            _merkleRoot: VALID_MERKLE_ROOT,
-            _merkleDataIPFSHash: VALID_MERKLE_IPFS,
-            _whitelistMaxTokens: INITIAL_TOKEN_FAIR_LAUNCH / 2
-        });
-
-        // Define our PoolKeys
-        PoolKey memory poolKey = positionManager.poolKey(memecoin);
+        PoolKey memory poolKey = _flaunchToken(VALID_MERKLE_ROOT, VALID_MERKLE_IPFS, INITIAL_TOKEN_FAIR_LAUNCH / 2, 0);
 
         vm.startPrank(WHITELISTED_USER);
 
@@ -502,6 +454,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
     function test_CannotSetWhitelist_WithUnapprovedCaller(address _approvedCaller, address _unapprovedCaller) public {
         // Ensure that the approved caller is not the same address as the unapproved caller
         vm.assume(_approvedCaller != _unapprovedCaller);
+        vm.assume(_unapprovedCaller != address(flaunchZap));
 
         // Approve our approved caller
         whitelistFairLaunch.setWhitelistZap(_approvedCaller, true);
@@ -666,10 +619,10 @@ contract WhitelistFairLaunchTest is FlaunchTest {
         assertEq(whitelistFairLaunch.whitelistPoolSwap(), _contract);
     }
 
-    function _flaunchToken(bytes32 _root, string memory _ipfs) internal returns (PoolKey memory) {
+    function _flaunchToken(bytes32 _root, string memory _ipfs, uint _maxTokens, uint _msgValue) internal returns (PoolKey memory) {
         // Flaunch a whitelist pool
-        (address memecoin,) = flaunchWhitelistZap.flaunch({
-            _params: PositionManager.FlaunchParams({
+        (address memecoin,,) = flaunchZap.flaunch{value: _msgValue}({
+            _flaunchParams: PositionManager.FlaunchParams({
                 name: 'Token',
                 symbol: 'TKN',
                 tokenUri: VALID_MERKLE_IPFS,
@@ -681,9 +634,22 @@ contract WhitelistFairLaunchTest is FlaunchTest {
                 initialPriceParams: abi.encode(5000e6),
                 feeCalculatorParams: abi.encode(1000)
             }),
-            _merkleRoot: _root,
-            _merkleDataIPFSHash: _ipfs,
-            _whitelistMaxTokens: 0
+            _whitelistParams: FlaunchZap.WhitelistParams({
+                merkleRoot: _root,
+                merkleIPFSHash: _ipfs,
+                maxTokens: _maxTokens
+            }),
+            _airdropParams: FlaunchZap.AirdropParams({
+                airdropIndex: 0,
+                airdropAmount: 0,
+                airdropEndTime: 0,
+                merkleRoot: bytes32(''),
+                merkleIPFSHash: ''
+            }),
+            _treasuryManagerParams: FlaunchZap.TreasuryManagerParams({
+                manager: address(0),
+                data: abi.encode('')
+            })
         });
 
         // Define our PoolKeys

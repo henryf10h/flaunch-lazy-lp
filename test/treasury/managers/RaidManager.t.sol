@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {OnboardingManager} from '@flaunch/treasury/managers/OnboardingManager.sol';
-import {RaidManager} from '@flaunch/treasury/managers/RaidManager.sol';
-
 import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 
+import {OnboardingManager} from '@flaunch/treasury/managers/OnboardingManager.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {RaidManager} from '@flaunch/treasury/managers/RaidManager.sol';
+
+import {ITreasuryManager} from '@flaunch-interfaces/ITreasuryManager.sol';
 
 import {FlaunchTest} from 'test/FlaunchTest.sol';
 
@@ -36,6 +37,18 @@ contract RaidManagerTest is FlaunchTest {
         token1 = _createERC721(user0);
         token2 = _createERC721(user1);
 
+        // Define our Base $FLAY PoolKey
+        uint flayTokenId = _createERC721(address(this));
+        flayPoolKey = positionManager.poolKey(flaunch.memecoin(flayTokenId));
+
+        // Set up our {TreasuryManagerFactory} and approve our raiding implementation
+        managerImplementation = address(new RaidManager(address(treasuryManagerFactory), payable(address(flayBurner)), address(snapshotAirdrop)));
+        treasuryManagerFactory.approveManager(managerImplementation);
+
+        // Deploy our {OnboardingManager} implementation
+        address payable implementation = treasuryManagerFactory.deployManager(managerImplementation);
+        raidManager = RaidManager(implementation);
+
         vm.startPrank(user0);
         flaunch.approve(address(raidManager), token0);
         flaunch.approve(address(raidManager), token1);
@@ -44,22 +57,13 @@ contract RaidManagerTest is FlaunchTest {
         vm.prank(user1);
         flaunch.approve(address(raidManager), token2);
 
-        // Define our Base $FLAY PoolKey
-        uint flayTokenId = _createERC721(address(this));
-        flayPoolKey = positionManager.poolKey(flaunch.memecoin(flayTokenId));
-
-        // Set up our {TreasuryManagerFactory} and approve our raiding implementation
-        managerImplementation = address(new RaidManager(address(flaunch), address(0), address(0), flayPoolKey));
-        treasuryManagerFactory.approveManager(managerImplementation);
-
-        // Deploy our {OnboardingManager} implementation
-        address payable implementation = treasuryManagerFactory.deployManager(managerImplementation);
-        raidManager = RaidManager(implementation);
-
         // Initialize a testing token
         vm.startPrank(user1);
         raidManager.initialize({
-            _tokenId: token2,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: token2
+            }),
             _owner: address(this),
             _data: abi.encode(
                 OnboardingManager.InitializeParams({
@@ -74,13 +78,13 @@ contract RaidManagerTest is FlaunchTest {
 
     function test_CanJoinRaid() public {
         vm.expectEmit();
-        emit RaidManager.RaidJoined(token0);
+        emit RaidManager.RaidJoined(address(flaunch), token0);
 
         vm.prank(user0);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         assertEq(flaunch.ownerOf(token0), address(raidManager));
-        assertEq(raidManager.raiders(token0), user0);
+        assertEq(raidManager.raiders(address(flaunch), token0), user0);
     }
 
     function test_CannotJoinRaidAfterWindowEnd(uint _delay) public {
@@ -90,57 +94,57 @@ contract RaidManagerTest is FlaunchTest {
         vm.startPrank(user0);
 
         vm.expectRevert(OnboardingManager.OnboardingWindowClosed.selector);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         vm.stopPrank();
     }
 
     function test_CannotJoinRaidIfTokenAlreadyRaiding() public {
         vm.startPrank(user0);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         vm.expectRevert(RaidManager.TokenAlreadyRaiding.selector);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
-        raidManager.joinRaid(token1);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token1));
         vm.stopPrank();
     }
 
     function test_CannotJoinRaidWithSomeoneElsesToken() public {
         vm.startPrank(user1);
         vm.expectRevert();
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
         vm.stopPrank();
     }
 
     function test_CanExitRaid() public {
         // Add our token to the raid
         vm.startPrank(user0);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         vm.expectEmit();
-        emit RaidManager.RaidExited(token0);
+        emit RaidManager.RaidExited(address(flaunch), token0);
 
-        raidManager.exitRaid(token0);
+        raidManager.exitRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         assertEq(flaunch.ownerOf(token0), user0);
-        assertEq(raidManager.raiders(token0), address(0));
+        assertEq(raidManager.raiders(address(flaunch), token0), address(0));
     }
 
     function test_CannotExitRaidIfNotTokenRaider() public {
         // Add our token to the raid
         vm.prank(user0);
-        raidManager.joinRaid(token0);
+        raidManager.joinRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
 
         vm.expectRevert(OnboardingManager.InvalidClaimer.selector);
         vm.prank(user1);
-        raidManager.exitRaid(token0);
+        raidManager.exitRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
     }
 
     function test_CannotExitRaidIfTokenNotRaider() public {
         vm.expectRevert();
         vm.prank(user0);
-        raidManager.exitRaid(token0);
+        raidManager.exitRaid(ITreasuryManager.FlaunchToken(flaunch, token0));
     }
 
     function _createERC721(address _recipient) internal returns (uint tokenId_) {

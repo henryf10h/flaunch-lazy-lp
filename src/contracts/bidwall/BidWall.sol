@@ -3,6 +3,8 @@ pragma solidity ^0.8.26;
 
 import {Ownable} from '@solady/auth/Ownable.sol';
 
+import {AccessControl} from '@openzeppelin/contracts/access/AccessControl.sol';
+
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 import {BalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
@@ -18,6 +20,7 @@ import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 import {CurrencySettler} from '@flaunch/libraries/CurrencySettler.sol';
 import {MemecoinFinder} from '@flaunch/types/MemecoinFinder.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 import {TickFinder} from '@flaunch/types/TickFinder.sol';
 
 import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
@@ -30,7 +33,7 @@ import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
  * After each deposit into the BidWall the position is rebalanced to ensure it remains 1 tick
  * below spot. This spot will be determined by the tick value before the triggering swap.
  */
-contract BidWall is Ownable {
+contract BidWall is AccessControl, Ownable {
 
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
@@ -83,11 +86,11 @@ contract BidWall is Ownable {
         uint cumulativeSwapFees;
     }
 
+    /// Timeout period to make a BidWall stale based on last transaction time
+    uint public constant STALE_TIME_WINDOW = 7 days;
+
     /// Our Uniswap V4 {PoolManager} contract
     IPoolManager public immutable poolManager;
-
-    /// Our {PositionManager} address
-    PositionManager public immutable positionManager;
 
     /// The native token used in the Flaunch protocol
     address public immutable nativeToken;
@@ -98,6 +101,9 @@ contract BidWall is Ownable {
     /// Maps our poolId to the `PoolInfo` struct for bidWall data
     mapping (PoolId _poolId => PoolInfo _poolInfo) public poolInfo;
 
+    /// Maps the last transaction time for a pool BidWall
+    mapping (PoolId _poolId => uint _timestamp) public lastPoolTransaction;
+
     /**
      * Set up our PoolManager and native ETH token.
      *
@@ -105,13 +111,15 @@ contract BidWall is Ownable {
      * @param _poolManager The Uniswap V4 {PoolManager}
      */
     constructor (address _nativeToken, address _poolManager, address _protocolOwner) {
-        positionManager = PositionManager(payable(msg.sender));
         nativeToken = _nativeToken;
         poolManager = IPoolManager(_poolManager);
 
         // Set our initial swapFeeThreshold and emit an update for the amount
         _swapFeeThreshold = 0.1 ether;
         emit FixedSwapFeeThresholdUpdated(0.1 ether);
+
+        // Set our caller to have the default admin of protocol roles
+        _grantRole(DEFAULT_ADMIN_ROLE, _protocolOwner);
 
         _initializeOwner(_protocolOwner);
     }
@@ -154,6 +162,9 @@ contract BidWall is Ownable {
         _poolInfo.cumulativeSwapFees += _ethSwapAmount;
         _poolInfo.pendingETHFees += _ethSwapAmount;
 
+        // Update the last transaction timestamp
+        lastPoolTransaction[poolId] = block.timestamp;
+
         // Send an event to notify that BidWall has received funds
         emit BidWallDeposit(poolId, _ethSwapAmount, _poolInfo.pendingETHFees);
 
@@ -163,6 +174,51 @@ contract BidWall is Ownable {
             return;
         }
 
+        // Modify our position to rebalance the liquidity
+        _reposition(_poolKey, _poolInfo, _currentTick, _nativeIsZero);
+    }
+
+    /**
+     * If there has been no transaction in the BidWall for a period of time, then we reposition
+     * the liquidity early ahead of the threshold being met. This check takes place in the
+     * `beforeSwap` hook so that the provided liquidity is present before the swap.
+     *
+     * @param _poolKey The PoolKey to modify the BidWall of
+     * @param _currentTick The current tick of the pool
+     * @param _nativeIsZero If the native token is `currency0`
+     */
+    function checkStalePosition(
+        PoolKey memory _poolKey,
+        int24 _currentTick,
+        bool _nativeIsZero
+    ) external onlyPositionManager {
+        // If our pool has not fallen stale, then exit early
+        PoolId poolId = _poolKey.toId();
+        if (lastPoolTransaction[poolId] + STALE_TIME_WINDOW > block.timestamp) {
+            return;
+        }
+
+        // If the BidWall has no pending fees, then we will have nothing to extract
+        // early, so we don't need to process our reposition.
+        PoolInfo storage _poolInfo = poolInfo[poolId];
+        if (_poolInfo.pendingETHFees == 0) {
+            return;
+        }
+
+        // Otherwise, if it is stale then we can exit the liquidity early
+        _reposition(_poolKey, _poolInfo, _currentTick, _nativeIsZero);
+    }
+
+    /**
+     * Repositions our BidWall liquidity, first extracting the existing position and then creating
+     * a new position.
+     *
+     * @param _poolKey The PoolKey to modify the BidWall of
+     * @param _poolInfo BidWall information for a specific pool
+     * @param _currentTick The current tick of the pool
+     * @param _nativeIsZero If the native token is `currency0`
+     */
+    function _reposition(PoolKey memory _poolKey, PoolInfo storage _poolInfo, int24 _currentTick, bool _nativeIsZero) internal {
         // Reset pending ETH token fees as we will be processing a bidwall initialization
         // or a rebalance.
         uint totalFees = _poolInfo.pendingETHFees;
@@ -184,7 +240,7 @@ contract BidWall is Ownable {
             // Send the received ETH to the {PositionManager}, as that will be supplying the ETH
             // tokens to create the new position.
             if (ethWithdrawn != 0) {
-                IERC20(nativeToken).transfer(address(positionManager), ethWithdrawn);
+                IERC20(nativeToken).transfer(msg.sender, ethWithdrawn);
             }
         } else {
             // If this is the first time we are adding liquidity, then we can set our
@@ -210,6 +266,7 @@ contract BidWall is Ownable {
          * the value if required.
          */
 
+        PoolId poolId = _poolKey.toId();
         (, int24 slot0Tick,,) = poolManager.getSlot0(poolId);
         if (_nativeIsZero == slot0Tick > _currentTick) {
             _currentTick = slot0Tick;
@@ -260,7 +317,7 @@ contract BidWall is Ownable {
         // If we are disabling our BidWall, then we want to also remove the current liquidity. We
         // need to send this through the {PositionManager} so that it can open a {PoolManager} lock.
         if (_disable) {
-            positionManager.closeBidWall(_key);
+            PositionManager(payable(address(_key.hooks))).closeBidWall(_key);
         }
 
         // Update our disabled flag
@@ -318,7 +375,7 @@ contract BidWall is Ownable {
         // Pending ETH fees are stored in the {PositionManager}. So if we have a value there, then we
         // will need to transfer this from the {PositionManager}, rather than this contract.
         if (pendingETHFees != 0) {
-            IERC20(nativeToken).transferFrom(address(positionManager), memecoinTreasury, pendingETHFees);
+            IERC20(nativeToken).transferFrom(msg.sender, memecoinTreasury, pendingETHFees);
         }
 
         // Transfer ETH withdrawn from the legacy position to the governance contract. We Avoid using
@@ -397,6 +454,11 @@ contract BidWall is Ownable {
      * @param _ethAmount The amount of native token we are adding to the BidWall
      */
     function _addETHLiquidity(PoolKey memory _key, bool _nativeIsZero, int24 _currentTick, uint _ethAmount) internal {
+        // If we have no ETH to process, then we cannot create a position
+        if (_ethAmount == 0) {
+            return;
+        }
+
         // Determine a base tick just outside of the current tick
         int24 baseTick = _nativeIsZero ? _currentTick + 1 : _currentTick - 1;
 
@@ -436,7 +498,7 @@ contract BidWall is Ownable {
             _tickLower: newTickLower,
             _tickUpper: newTickUpper,
             _liquidityDelta: int128(liquidityDelta),
-            _sender: address(positionManager)
+            _sender: address(_key.hooks)
         });
 
         // Update the BidWall position tick range
@@ -555,10 +617,10 @@ contract BidWall is Ownable {
     }
 
     /**
-     * Ensures that only the immutable {PositionManager} can call the function.
+     * Ensures that only a {PositionManager} can call the function.
      */
     modifier onlyPositionManager {
-        if (msg.sender != address(positionManager)) revert NotPositionManager();
+        if (!hasRole(ProtocolRoles.POSITION_MANAGER, msg.sender)) revert NotPositionManager();
         _;
     }
 

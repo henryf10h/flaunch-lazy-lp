@@ -15,7 +15,6 @@ contract TreasuryActionManagerTest is FlaunchTest {
 
     using PoolIdLibrary for PoolKey;
 
-    TreasuryActionManager internal actionManager;
     BlankAction internal blankAction;
 
     address internal token;
@@ -23,9 +22,6 @@ contract TreasuryActionManagerTest is FlaunchTest {
     constructor () {
         // Deploy our platform
         _deployPlatform();
-
-        // Register our {TreasuryActionManager}
-        actionManager = positionManager.actionManager();
 
         // Register our blank action
         blankAction = new BlankAction();

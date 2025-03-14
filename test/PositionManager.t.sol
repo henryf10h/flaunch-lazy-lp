@@ -16,6 +16,7 @@ import {Flaunch} from '@flaunch/Flaunch.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
+import {UniswapHookEvents} from '@flaunch/libraries/UniswapHookEvents.sol';
 
 import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
 
@@ -397,7 +398,7 @@ contract PositionManagerTest is FlaunchTest {
         flaunch.burn(flaunch.tokenId(memecoin));
     }
 
-    function test_CannotBurn721IfApproved() public {
+    function test_CanBurn721IfApproved() public {
         address memecoin = positionManager.flaunch(
             PositionManager.FlaunchParams({
                 name: 'Token Name',
@@ -463,6 +464,86 @@ contract PositionManagerTest is FlaunchTest {
                 flaunchAt: 0,
                 initialPriceParams: abi.encode(''),
                 feeCalculatorParams: abi.encode(1_000)
+            })
+        );
+    }
+
+    function test_CanCaptureHookSwapEvents() public {
+        // Flaunch our new token
+        address memecoin = positionManager.flaunch(
+            PositionManager.FlaunchParams({
+                name: 'Token Name',
+                symbol: 'TOKEN',
+                tokenUri: 'https://flaunch.gg/',
+                initialTokenFairLaunch: 1e18,
+                premineAmount: 0,
+                creator: address(this),
+                creatorFeeAllocation: 0,
+                flaunchAt: 0,
+                initialPriceParams: abi.encode(''),
+                feeCalculatorParams: abi.encode(1_000)
+            })
+        );
+
+        // Get the {PoolKey} that we will swap against
+        PoolKey memory poolKey = positionManager.poolKey(memecoin);
+
+        flETH.deposit{value: 100 ether}();
+
+        // Provide this test contract enough flETH to make the swap
+        flETH.approve(address(poolSwap), type(uint).max);
+
+        // Provide the PoolManager with some ETH because otherwise it sulks about being poor
+        flETH.transfer(address(poolManager), 50 ether);
+
+        // Mock a deposit into the ISP
+        // deal(memecoin, address(positionManager), IERC20(memecoin).balanceOf(positionManager) + 0.5 ether);
+        flETH.transfer(address(positionManager), 0.5 ether);
+        positionManager.depositFeesMock(poolKey, 0.5 ether, 0.5 ether);
+
+        // Detect our PositionManager swap
+        vm.expectEmit();
+        emit PositionManager.PoolSwap({
+            poolId: poolKey.toId(),
+            flAmount0: -500040918299108460,
+            flAmount1: 1000000000000000000,
+            flFee0: 0,
+            flFee1: -10000000000000000,
+            ispAmount0: 0,
+            ispAmount1: 0,
+            ispFee0: 0,
+            ispFee1: 0,
+            uniAmount0: -19499959081700891540,
+            uniAmount1: 503396135662060805,
+            uniFee0: 0,
+            uniFee1: -5033961356620608
+        });
+
+        // Detect our Uniswap V4 swap
+        vm.expectEmit();
+        emit UniswapHookEvents.HookSwap({
+            id: PoolId.unwrap(poolKey.toId()),
+            sender: address(poolSwap),
+            amount0: -500040918299108460,
+            amount1: 1000000000000000000,
+            hookLPfeeAmount0: 0,
+            hookLPfeeAmount1: 0
+        });
+
+        vm.expectEmit();
+        emit UniswapHookEvents.HookFee({
+            id: PoolId.unwrap(poolKey.toId()),
+            sender: address(poolSwap),
+            feeAmount0: 0,
+            feeAmount1: 10000000000000000
+        });
+
+        poolSwap.swap(
+            poolKey,
+            IPoolManager.SwapParams({
+                zeroForOne: true,
+                amountSpecified: -20 ether,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             })
         );
     }

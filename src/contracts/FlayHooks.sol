@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {Ownable} from '@solady/auth/Ownable.sol';
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 import {BalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
@@ -22,7 +23,7 @@ import {InternalSwapPool} from '@flaunch/hooks/InternalSwapPool.sol';
  * This is a Uniswap V4 hook contract that enables Internal Swap Pool and BidWall for
  * FLETH/FLAY pool.
  */
-contract FlayHooks is BaseHook, InternalSwapPool {
+contract FlayHooks is BaseHook, InternalSwapPool, Ownable {
     
     using PoolIdLibrary for PoolKey;
     using BeforeSwapDeltaLibrary for BeforeSwapDelta;
@@ -50,6 +51,9 @@ contract FlayHooks is BaseHook, InternalSwapPool {
     /// Store the contract that will manage our Bidwall interactions
     BidWall public immutable bidWall;
 
+    /// Store an optional flayBurner address
+    address payable public flayBurner;
+
     /// The pool key for the flayNative pool
     PoolKey public flayNativePoolKey;
 
@@ -63,6 +67,9 @@ contract FlayHooks is BaseHook, InternalSwapPool {
      * @param _protocolOwner The address to set as the {Ownable} owner for the {BidWall}
      */
     constructor(uint160 _initialSqrtPriceX96, address _protocolOwner) BaseHook(IPoolManager(_poolManager)) {
+        // Initialize the Ownable contract
+        _initializeOwner(_protocolOwner);
+
         // Deploy our BidWall contract and transfer ownership to the protocol owner
         bidWall = new BidWall(nativeToken, _poolManager, _protocolOwner);
 
@@ -268,10 +275,22 @@ contract FlayHooks is BaseHook, InternalSwapPool {
         // Reduce our available fees for the pool
         _poolFees[poolId].amount0 = 0;
 
-        // All fees are directly deposited into the BidWall
-        bidWall.deposit(_poolKey, bidWallFee, _beforeSwapTick, true);
+        // Check if we have a flayBurner address. If we do then send the ETH there to
+        // process into a buy and burn.
+        if (flayBurner != address(0)) {
+            // Transfer the flETH fees to the flayBurner
+            IERC20(nativeToken).transfer(flayBurner, bidWallFee);
+        }
+        // Otherwise, we send the fees to the BidWall
+        else {
+            // All fees are directly deposited into the BidWall
+            bidWall.deposit(_poolKey, bidWallFee, _beforeSwapTick, true);
 
-        emit PoolFeesDistributed(poolId, bidWallFee, 0, bidWallFee, 0, 0);
+            emit PoolFeesDistributed(poolId, bidWallFee, 0, bidWallFee, 0, 0);
+        }
     }
 
+    function setFlayBurner(address _flayBurner) external onlyOwner {
+        flayBurner = payable(_flayBurner);
+    }
 }

@@ -16,6 +16,7 @@ import {FeeDistributor} from '@flaunch/hooks/FeeDistributor.sol';
 import {Flaunch} from '@flaunch/Flaunch.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
 
 import {FlaunchTest} from '../FlaunchTest.sol';
@@ -34,7 +35,7 @@ contract FairLaunchTest is FlaunchTest {
     uint FAIR_LAUNCH_WINDOW;
 
     address MEMECOIN_UNFLIPPED = 0xF2C9428E4C5657e1Ea0c45C3ffD227025CA05f00;
-    address MEMECOIN_FLIPPED = 0x17d13f731b5e9331b43db0515a4F586dFD1Dc5ba;
+    address MEMECOIN_FLIPPED = 0x32a65F37D7CA5aa2AA1A9A81E6DEeEa36198554a;
 
     constructor () {
         // Deploy our platform
@@ -469,7 +470,10 @@ contract FairLaunchTest is FlaunchTest {
         );
     }
 
-    function test_FairLaunchSwap() public {
+    function test_CanFairLaunchSwap(uint _supply) public {
+        // Ensure our supply is within the full range (0 - 100%)
+        _supply = bound(_supply, 0, 100);
+
         deal(address(WETH), address(poolManager), 1000e27 ether);
 
         initialPrice.setSqrtPriceX96(
@@ -479,10 +483,23 @@ contract FairLaunchTest is FlaunchTest {
             })
         );
 
-        positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 0, 0, abi.encode(''), abi.encode(1_000)));
+        positionManager.flaunch(
+            PositionManager.FlaunchParams(
+                'name',
+                'symbol',
+                'https://token.gg/',
+                supplyShare(_supply),
+                0,
+                address(this),
+                0,
+                0,
+                abi.encode(''),
+                abi.encode(1_000)
+            )
+        );
 
         // Deal enough ETH to fulfill the entire FairLaunch position
-        deal(address(WETH), address(this), 0.1e18);
+        deal(address(WETH), address(this), 1000e18);
         WETH.approve(address(poolSwap), type(uint).max);
 
         // Action our swap to buy all of the FairLaunch tokens from the pool
@@ -490,7 +507,7 @@ contract FairLaunchTest is FlaunchTest {
             poolKey(false),
             IPoolManager.SwapParams({
                 zeroForOne: true,
-                amountSpecified: -0.1e18,
+                amountSpecified: -1000e18,
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             })
         );

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Ownable} from "@solady/auth/Ownable.sol";
+
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -10,8 +11,10 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 
-import {HypeFeeCalculator} from "@flaunch/fees/HypeFeeCalculator.sol";
 import {FairLaunch} from "@flaunch/hooks/FairLaunch.sol";
+import {HypeFeeCalculator} from "@flaunch/fees/HypeFeeCalculator.sol";
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
+
 import {FlaunchTest} from "../FlaunchTest.sol";
 
 contract HypeFeeCalculatorTest is FlaunchTest {
@@ -30,8 +33,10 @@ contract HypeFeeCalculatorTest is FlaunchTest {
 
     function setUp() public {
         // Deploy mock FairLaunch contract
-        vm.prank(POSITION_MANAGER);
+        vm.startPrank(POSITION_MANAGER);
         mockFairLaunch = new FairLaunch(IPoolManager(address(0)));
+        mockFairLaunch.grantRole(ProtocolRoles.POSITION_MANAGER, POSITION_MANAGER);
+        vm.stopPrank();
 
         // Deploy HypeFeeCalculator
         feeCalculator = new HypeFeeCalculator(mockFairLaunch, NATIVE_TOKEN);
@@ -46,11 +51,6 @@ contract HypeFeeCalculatorTest is FlaunchTest {
         });
 
         poolId = poolKey.toId();
-    }
-
-    // positionManager()
-    function test_CanReferencePositionManager() public view {
-        assertEq(feeCalculator.positionManager(), POSITION_MANAGER);
     }
 
     /// setTargetTokensPerSec()

@@ -686,10 +686,10 @@ contract SnapshotAirdropTest is FlaunchTest {
         deal(address(flETH), address(poolManager), 1000e27 ether);
 
         // Calculate the fee with 0% slippage
-        uint ethRequired = premineZap.calculateFee(tokensToPremine, 0, abi.encode(''));
+        uint ethRequired = flaunchZap.calculateFee(tokensToPremine, 0, abi.encode(''));
 
         // Flaunch the memecoin and premine the airdrop amount
-        (_memecoin, ) = premineZap.flaunch{value: ethRequired}(PositionManager.FlaunchParams({
+        (_memecoin,,) = flaunchZap.flaunch{value: ethRequired}(PositionManager.FlaunchParams({
             name: "TEST",
             symbol: "TEST",
             tokenUri: 'https://token.gg/',

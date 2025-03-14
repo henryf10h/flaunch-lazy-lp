@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Currency, CurrencyLibrary} from '@uniswap/v4-core/src/types/Currency.sol';
-import {IPoolManager} from '@uniswap/v4-core/src/interfaces/IPoolManager.sol';
-import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
-import {SafeCast} from '@uniswap/v4-core/src/libraries/SafeCast.sol';
-import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-
 import {Flaunch} from '@flaunch/Flaunch.sol';
-import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
+import {FlayBurner} from '@flaunch/libraries/FlayBurner.sol';
+import {SingleTokenManager} from '@flaunch/treasury/managers/SingleTokenManager.sol';
 
 import {ISnapshotAirdrop} from '@flaunch-interfaces/ISnapshotAirdrop.sol';
-import {IPoolSwap} from '@flaunch-interfaces/IPoolSwap.sol';
 import {IFLETH} from '@flaunch-interfaces/IFLETH.sol';
 
 
@@ -25,12 +17,8 @@ import {IFLETH} from '@flaunch-interfaces/IFLETH.sol';
  * they will receive a set amount of the fees collected, and the remaining fees will be distributed
  * to holders via the {ISnapshotAirdrop} contract.
  */
-contract OnboardingManager is TreasuryManager {
+contract OnboardingManager is SingleTokenManager {
 
-    using CurrencyLibrary for Currency;
-    using SafeCast for uint;
-
-    error CannotBeZeroAddress();
     error CannotRescueToken();
     error InsufficientClaimWindow();
     error InvalidClaimer();
@@ -39,14 +27,12 @@ contract OnboardingManager is TreasuryManager {
     error OnboardingWindowClosed();
     error OnboardingWindowNotClosed();
     error TokenAlreadyClaimed();
-    error TokenIdAlreadySet(uint _tokenId);
 
-    event ManagerInitialized(uint _tokenId, InitializeParams _params);
+    event ManagerInitialized(address indexed _flaunch, uint indexed _tokenId, InitializeParams _params);
     event OnboardeeUpdated(address _onboardee);
 
-    event OnboardeeClaim(uint _tokenId, address _onboardee, uint _onboardeeAmount, uint _publicAmount, uint _airdropIndex);
-    event OnboardeeReleased(uint _tokenId, address _onboardee, uint _buyBack);
-    event OnboardingMarketBuy(uint _tokenId, uint _flethSpent, uint _flayBurned);
+    event OnboardeeClaim(address indexed _flaunch, uint indexed _tokenId, address _onboardee, uint _onboardeeAmount, uint _publicAmount, uint _airdropIndex);
+    event OnboardeeReleased(address indexed _flaunch, uint indexed _tokenId, address _onboardee, uint _buyBack);
 
     /**
      * Parameters passed during manager initialization.
@@ -60,12 +46,6 @@ contract OnboardingManager is TreasuryManager {
     /// The maximum value an onboardee allocation should be (100%)
     uint public constant MAX_ONBOARDEE_ALLOCATION = 100_00;
 
-    /// The `dEaD` address to burn our $FLAY tokens to
-    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
-
-    /// The {Flaunch} token ID stored in the contract
-    uint public tokenId;
-
     /// The onboardee and their allocation percentage (2dp)
     address payable public onboardee;
     uint public onboardeeAllocation;
@@ -73,22 +53,14 @@ contract OnboardingManager is TreasuryManager {
     /// The {ISnapshotAirdrop} contract used by the Flaunch protocol
     ISnapshotAirdrop public immutable airdropClaim;
 
+    /// The {FlayBurner} contract
+    FlayBurner public immutable flayBurner;
+
     /// The index of the airdrop created by the claim
     uint public airdropIndex;
 
-    /// The {PoolSwap} contract
-    IPoolSwap public immutable poolSwap;
-
     /// The `block.timestamp` at which the the claim window closes
     uint public claimWindowEnd;
-
-    /// The `PoolKey` used for $FLAY on Uniswap V4
-    // solidity doesn't support immutable structs, so we'll use these as a workaround
-    Currency immutable flayPoolKey_currency0;
-    Currency immutable flayPoolKey_currency1;
-    uint24 immutable flayPoolKey_fee;
-    int24 immutable flayPoolKey_tickSpacing;
-    IHooks immutable flayPoolKey_hooks;
 
     /// Stores if the token has been claimed
     bool public claimed;
@@ -96,19 +68,13 @@ contract OnboardingManager is TreasuryManager {
     /**
      * Sets up the contract with the initial required contract addresses.
      *
-     * @param _flaunch The {Flaunch} ERC721 contract address
+     * @param _treasuryManagerFactory The {TreasuryManagerFactory} that will launch this implementation
+     * @param _flayBurner The {FlayBurner} contract address
      * @param _airdropClaim The {ISnapshotAirdrop} contract that will distribute claims
-     * @param _poolSwap The {IPoolSwap} contract that will facilitate market buys
      */
-    constructor (address _flaunch, address _airdropClaim, address _poolSwap, PoolKey memory _flayPoolKey) TreasuryManager(_flaunch) {
+    constructor (address _treasuryManagerFactory, address payable _flayBurner, address _airdropClaim) SingleTokenManager(_treasuryManagerFactory) {
         airdropClaim = ISnapshotAirdrop(_airdropClaim);
-        poolSwap = IPoolSwap(_poolSwap);
-        
-        flayPoolKey_currency0 = _flayPoolKey.currency0;
-        flayPoolKey_currency1 = _flayPoolKey.currency1;
-        flayPoolKey_fee = _flayPoolKey.fee;
-        flayPoolKey_tickSpacing = _flayPoolKey.tickSpacing;
-        flayPoolKey_hooks = _flayPoolKey.hooks;
+        flayBurner = FlayBurner(_flayBurner);
     }
 
     /**
@@ -116,19 +82,10 @@ contract OnboardingManager is TreasuryManager {
      * registered to the manager. We also set our initial configurations, though the majority
      * of these can be updated by the owner at a later date.
      *
-     * @param _tokenId The Flaunch tokenId that is being managed
+     * @param _flaunchToken The Flaunch token that is being deposited
      * @param _data Onboarding variables
      */
-    function _initialize(uint _tokenId, bytes calldata _data) internal override {
-        // Confirm that we only have one tokenId assigned to the escrow. The zero tokenId does
-        // not exist, so we can safely check against a zero value.
-        if (tokenId != 0) {
-            revert TokenIdAlreadySet(tokenId);
-        }
-
-        // Assign our tokenId to the manager
-        tokenId = _tokenId;
-
+    function _initialize(FlaunchToken calldata _flaunchToken, bytes calldata _data) internal override depositSingleToken(_flaunchToken) {
         // Unpack our initial configuration data
         (InitializeParams memory params) = abi.decode(_data, (InitializeParams));
 
@@ -137,13 +94,17 @@ contract OnboardingManager is TreasuryManager {
             revert InvalidOnboardeeAllocation();
         }
 
+        if (params.claimWindowEnd <= block.timestamp) {
+            revert InsufficientClaimWindow();
+        }
+
         // The rest can be assigned without further validation
         onboardee = params.onboardee;
         onboardeeAllocation = params.onboardeeAllocation;
         claimWindowEnd = params.claimWindowEnd;
 
         // Emit an event that shows our initial data
-        emit ManagerInitialized(_tokenId, params);
+        emit ManagerInitialized(address(flaunchToken.flaunch), flaunchToken.tokenId, params);
     }
 
     /**
@@ -151,7 +112,7 @@ contract OnboardingManager is TreasuryManager {
      * the ERC721 has been under the ownership of this manager. The remaining ETH is dispersed to
      * holders via a snapshot airdrop.
      */
-    function claim() public onlyNotClaimed {
+    function claim() public tokenExists onlyNotClaimed {
         // Ensure that only the onboardee can make the claim
         if (msg.sender != onboardee) {
             revert InvalidClaimer();
@@ -166,10 +127,10 @@ contract OnboardingManager is TreasuryManager {
         claimed = true;
 
         // Transfer the token to the onboardee
-        flaunch.transferFrom(address(this), onboardee, tokenId);
+        flaunchToken.flaunch.transferFrom(address(this), onboardee, flaunchToken.tokenId);
 
         // Claim the fees owed to the token, bringing all the ETH revenue into this contract
-        flaunch.positionManager().withdrawFees(address(this), true);
+        flaunchToken.flaunch.positionManager().withdrawFees(address(this), true);
 
         // Calculate the amount of revenue earned and find the onboardee share
         uint revenue = payable(address(this)).balance;
@@ -190,7 +151,7 @@ contract OnboardingManager is TreasuryManager {
 
         if (publicAmount != 0) {
             airdropIndex = airdropClaim.addAirdrop{value: publicAmount}({
-                _memecoin: flaunch.memecoin(tokenId),
+                _memecoin: flaunchToken.flaunch.memecoin(flaunchToken.tokenId),
                 _creator: address(this),
                 _token: address(0),
                 _amount: publicAmount,
@@ -199,7 +160,7 @@ contract OnboardingManager is TreasuryManager {
         }
 
          // Emit our onboardee claim event
-        emit OnboardeeClaim(tokenId, onboardee, onboardeeAmount, publicAmount, airdropIndex);
+        emit OnboardeeClaim(address(flaunchToken.flaunch), flaunchToken.tokenId, onboardee, onboardeeAmount, publicAmount, airdropIndex);
     }
 
     /**
@@ -210,41 +171,50 @@ contract OnboardingManager is TreasuryManager {
      * @dev This function call does not need to mark the `claimed` boolean as true, as we burn
      * the ERC721. This means there is no way for it to re-enter the contract.
      */
-    function release() public onlyOwner onlyNotClaimed {
+    function release() public tokenExists onlyNotClaimed {
         // Ensure that the timelock has passed and ended
         if (block.timestamp <= claimWindowEnd) {
             revert OnboardingWindowNotClosed();
         }
 
         // Claim the fees owed to the token, bringing all the revenue in as flETH
-        flaunch.positionManager().withdrawFees(address(this), false);
+        flaunchToken.flaunch.positionManager().withdrawFees(address(this), false);
+
+        // Convert the ETH received into FLETH
+        IFLETH fleth = flayBurner.fleth();
+        fleth.deposit{value: address(this).balance}(0);
 
         // Capture the amount of flETH and emit our release event
-        uint flethBalance = IFLETH(flaunch.positionManager().nativeToken()).balanceOf(address(this));
-        emit OnboardeeReleased(tokenId, onboardee, flethBalance);
+        uint flethBalance = fleth.balanceOf(address(this));
+        emit OnboardeeReleased(address(flaunchToken.flaunch), flaunchToken.tokenId, onboardee, flethBalance);
 
         // Action a market buy against our $FLAY token
-        _marketBuyToken();
+        fleth.approve(address(flayBurner), flethBalance);
+        flayBurner.buyAndBurn(flethBalance);
 
         // Burn the ERC721 ownership
-        flaunch.burn(tokenId);
+        flaunchToken.flaunch.burn(flaunchToken.tokenId);
     }
 
     /**
      * Allows anyone to withdraw the remaining airdrop amount, after the airdrop has ended.
      */
-    function recoverAirdrop() public {
+    function recoverAirdrop() public tokenExists {
         // Reclaim fees from our airdrop as ETH
         airdropClaim.creatorWithdraw({
-            _memecoin: flaunch.memecoin(tokenId),
+            _memecoin: flaunchToken.flaunch.memecoin(flaunchToken.tokenId),
             _airdropIndex: airdropIndex
         });
 
         // Convert the ETH received into FLETH before the market buy
-        IFLETH(flaunch.positionManager().nativeToken()).deposit{value: address(this).balance}(0);
+        IFLETH fleth = flayBurner.fleth();
+        fleth.deposit{value: address(this).balance}(0);
 
         // Action a market buy against our $FLAY token with the recovered fees
-        _marketBuyToken();
+        uint flethBalance = fleth.balanceOf(address(this));
+
+        fleth.approve(address(flayBurner), flethBalance);
+        flayBurner.buyAndBurn(flethBalance);
     }
 
     /**
@@ -256,66 +226,17 @@ contract OnboardingManager is TreasuryManager {
      *
      * @param _onboardee The new Onboardee address
      */
-    function setOnboardee(address payable _onboardee) public onlyOwner onlyNotClaimed {
+    function setOnboardee(address payable _onboardee) public onlyManagerOwner onlyNotClaimed {
         onboardee = _onboardee;
         emit OnboardeeUpdated(_onboardee);
-    }
-
-    /**
-     * Actions a market buy against our $FLAY pool, spending FLETH as our specified token.
-     *
-     * @dev This always uses the full balance of FLETH held by this contract
-     */
-    function _marketBuyToken() internal {
-        // Find our native token (fleth) from the PoolKey
-        IFLETH nativeToken = IFLETH(flaunch.positionManager().nativeToken());
-
-        // Capture the amount of native token held by the sender from the claim
-        uint amountSpecified = nativeToken.balanceOf(address(this));
-        if (amountSpecified != 0) {
-            // Approve the swap contract to use our flETH
-            nativeToken.approve(address(poolSwap), amountSpecified);
-
-            // Check if the native token is `currency0`
-            bool nativeIsZero = address(nativeToken) == Currency.unwrap(flayPoolKey_currency0);
-
-            // Action our swap against the {PoolSwap} contract, buying $FLAY from the PoolKey set
-            poolSwap.swap({
-                _key: flayPoolKey(),
-                _params: IPoolManager.SwapParams({
-                    zeroForOne: nativeIsZero,
-                    amountSpecified: -amountSpecified.toInt256(),
-                    sqrtPriceLimitX96: nativeIsZero ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-                })
-            });
-
-            // Burn $FLAY tokens earned from the swap. The $FLAY token's burn function can only be called
-            // by the Optimism's bridge contract, so instead we send the tokens to the `0xdead` address to
-            // burn them.
-            Currency flayToken = (nativeIsZero) ? flayPoolKey_currency1 : flayPoolKey_currency0;
-            uint flayAmount = flayToken.balanceOfSelf();
-
-            flayToken.transfer(BURN_ADDRESS, flayAmount);
-            emit OnboardingMarketBuy(tokenId, amountSpecified, flayAmount);
-        }
     }
 
     /**
      * This manager handles our Flaunch ERC721 withdrawals from specific function calls. For
      * this reason, we want to ensure that our expected flows are not bypassed with this function.
      */
-    function rescue(uint /* _tokenId */, address /* _recipient */) public pure override {
+    function rescue(FlaunchToken calldata /* _flaunchToken */, address /* _recipient */) public pure override {
         revert CannotRescueToken();
-    }
-
-    function flayPoolKey() public view returns (PoolKey memory) {
-        return PoolKey({
-            currency0: flayPoolKey_currency0,
-            currency1: flayPoolKey_currency1,
-            fee: flayPoolKey_fee,
-            tickSpacing: flayPoolKey_tickSpacing,
-            hooks: flayPoolKey_hooks
-        });
     }
 
     /**

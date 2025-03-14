@@ -2,7 +2,6 @@
 pragma solidity ^0.8.26;
 
 import {stdJson} from 'forge-std/StdJson.sol';
-import {println} from 'vulcan/test.sol';
 
 import {PositionManager} from '@flaunch/PositionManager.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
@@ -16,7 +15,9 @@ import {IBaseAirdrop} from '@flaunch-interfaces/IBaseAirdrop.sol';
 
 import {FlaunchTest} from 'test/FlaunchTest.sol';
 
+
 contract MerkleAirdropTest is FlaunchTest {
+
     using stdJson for string;
 
     struct MerkleJSON {
@@ -452,15 +453,6 @@ contract MerkleAirdropTest is FlaunchTest {
         merkleJSON.totalTokensToAirdropInWei = _merkleJson.readUint('.totalTokensToAirdropInWei');
         merkleJSON.totalTokensToAirdropFormatted = _merkleJson.readString('.totalTokensToAirdropFormatted');
 
-        // println("root: {b32}", abi.encode(merkleJSON.root));
-        // println("creator: {a}", abi.encode(merkleJSON.creator));
-        // println("airdropIndex: {u}", abi.encode(merkleJSON.airdropIndex));
-        // println("token: {a}", abi.encode(merkleJSON.token));
-        // println("tokenSymbol: {s}", abi.encode(merkleJSON.tokenSymbol));
-        // println("tokenDecimals: {u}", abi.encode(merkleJSON.tokenDecimals));
-        // println("totalTokensToAirdropInWei: {u}", abi.encode(merkleJSON.totalTokensToAirdropInWei));
-        // println("totalTokensToAirdropFormatted: {s}", abi.encode(merkleJSON.totalTokensToAirdropFormatted));
-
         // Get all keys (addresses) from userData object
         string[] memory userAddressesString = vm.parseJsonKeys(_merkleJson, ".userData");
 
@@ -481,12 +473,8 @@ contract MerkleAirdropTest is FlaunchTest {
                 _merkleJson,
                 string.concat(userPath, '.proof')
             );
-            userData.proof = proof;
 
-            // println("Parsed data for address: {a}", abi.encode(userAddress));
-            // println("Amount in Wei: {u}", abi.encode(userData.airdropAmountInWei));
-            // println("Amount formatted: {s}", abi.encode(userData.airdropAmountFormatted));
-            // println("Proof length: {u}", abi.encode(proof.length));
+            userData.proof = proof;
         }
     }
 
@@ -501,10 +489,10 @@ contract MerkleAirdropTest is FlaunchTest {
         deal(address(flETH), address(poolManager), 1000e27 ether);
 
         // Calculate the fee with 0% slippage
-        uint ethRequired = premineZap.calculateFee(merkleJSON.totalTokensToAirdropInWei, 0, abi.encode(''));
+        uint ethRequired = flaunchZap.calculateFee(merkleJSON.totalTokensToAirdropInWei, 0, abi.encode(''));
 
         // Flaunch the memecoin and premine the airdrop amount
-        (address memecoin, ) = premineZap.flaunch{value: ethRequired}(PositionManager.FlaunchParams({
+        (address memecoin,,) = flaunchZap.flaunch{value: ethRequired}(PositionManager.FlaunchParams({
             name: "TEST",
             symbol: "TEST",
             tokenUri: 'https://token.gg/',

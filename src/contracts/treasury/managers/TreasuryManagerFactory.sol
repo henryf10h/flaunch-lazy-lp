@@ -4,6 +4,8 @@ pragma solidity ^0.8.26;
 import {Ownable} from '@solady/auth/Ownable.sol';
 import {LibClone} from '@solady/utils/LibClone.sol';
 
+import {AccessControl} from '@openzeppelin/contracts/access/AccessControl.sol';
+
 import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
 
 import {ITreasuryManagerFactory} from '@flaunch-interfaces/ITreasuryManagerFactory.sol';
@@ -12,7 +14,7 @@ import {ITreasuryManagerFactory} from '@flaunch-interfaces/ITreasuryManagerFacto
 /**
  * Allows the contract owner to manage approved {ITreasuryAction} contracts.
  */
-contract TreasuryManagerFactory is ITreasuryManagerFactory, Ownable {
+contract TreasuryManagerFactory is AccessControl, ITreasuryManagerFactory, Ownable {
 
     error UnknownManagerImplemention();
 
@@ -33,6 +35,9 @@ contract TreasuryManagerFactory is ITreasuryManagerFactory, Ownable {
      */
     constructor (address _protocolOwner) {
         _initializeOwner(_protocolOwner);
+
+        // Set our protocol owner to have the default admin of protocol roles
+        _grantRole(DEFAULT_ADMIN_ROLE, _protocolOwner);
     }
 
     /**

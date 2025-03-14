@@ -10,6 +10,7 @@ import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 import {FlaunchTest} from 'test/FlaunchTest.sol';
 
 contract FastFlaunchZapTests is FlaunchTest {
+
     using PoolIdLibrary for PoolKey;
 
     constructor () {
@@ -17,15 +18,12 @@ contract FastFlaunchZapTests is FlaunchTest {
         _deployPlatform();
     }
 
-    function test_CanFastFlaunch(uint24 _creatorFeeAllocation, bool _flipped) public flipTokens(_flipped) {
-        vm.assume(_creatorFeeAllocation <= 100_00);
-
+    function test_CanFastFlaunch(bool _flipped) public flipTokens(_flipped) {
         address memecoin = fastFlaunchZap.flaunch(FastFlaunchZap.FastFlaunchParams({
             name: 'Token Name',
             symbol: 'TOKEN',
             tokenUri: 'https://flaunch.gg/',
-            creator: address(this),
-            creatorFeeAllocation: _creatorFeeAllocation
+            creator: address(this)
         }));
 
         PoolId poolId = positionManager.poolKey(memecoin).toId();

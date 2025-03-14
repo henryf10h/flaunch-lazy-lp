@@ -15,29 +15,29 @@ contract RaidManager is OnboardingManager {
 
     error TokenAlreadyRaiding();
 
-    event RaidExited(uint _tokenId);
-    event RaidJoined(uint _tokenId);
+    event RaidExited(address _flaunch, uint _tokenId);
+    event RaidJoined(address _flaunch, uint _tokenId);
 
     /// Maintains a list of the raiders that have staked their token
-    mapping (uint _tokenId => address _owner) public raiders;
+    mapping (address _flaunch => mapping(uint _tokenId => address _owner)) public raiders;
 
     /**
      * Sets up the contract with the initial required contract addresses.
      *
-     * @param _flaunch The {Flaunch} ERC721 contract address
+     * @param _treasuryManagerFactory The {TreasuryManagerFactory} that will launch this implementation
+     * @param _flayBurner The {FlayBurner} contract address
      * @param _airdropClaim The {IMerkleAirdrop} contract that will distribute claims
-     * @param _poolSwap The {IPoolSwap} contract that will facilitate market buys
      */
-    constructor (address _flaunch, address _airdropClaim, address _poolSwap, PoolKey memory _flayPoolKey)
-        OnboardingManager(_flaunch, _airdropClaim, _poolSwap, _flayPoolKey) {}
+    constructor (address _treasuryManagerFactory, address payable _flayBurner, address _airdropClaim)
+        OnboardingManager(_treasuryManagerFactory, _flayBurner, _airdropClaim) {}
 
     /**
      * Allows an Flaunch ERC721 holder to stake their token against the onboardee raid and
      * donate their token revenue to the pot.
      *
-     * @param _tokenId The Flaunch tokenId being transferred in
+     * @param _flaunchToken The Flaunch token being transferred in
      */
-    function joinRaid(uint _tokenId) public onlyNotClaimed {
+    function joinRaid(FlaunchToken calldata _flaunchToken) public onlyNotClaimed {
         // Confirm not ended
         if (block.timestamp > claimWindowEnd) {
             revert OnboardingWindowClosed();
@@ -45,38 +45,38 @@ contract RaidManager is OnboardingManager {
 
         // Confirm that the raider is not already set. This should be prevented by the
         // subsequent transfer call, but this returns a better error detail.
-        if (raiders[_tokenId] != address(0)) {
+        if (raiders[address(_flaunchToken.flaunch)][_flaunchToken.tokenId] != address(0)) {
             revert TokenAlreadyRaiding();
         }
 
         // Transfer token into the contract
-        flaunch.transferFrom(msg.sender, address(this), _tokenId);
+        _flaunchToken.flaunch.transferFrom(msg.sender, address(this), _flaunchToken.tokenId);
 
         // Add the raider mapping
-        raiders[_tokenId] = msg.sender;
+        raiders[address(_flaunchToken.flaunch)][_flaunchToken.tokenId] = msg.sender;
 
-        emit RaidJoined(_tokenId);
+        emit RaidJoined(address(_flaunchToken.flaunch), _flaunchToken.tokenId);
     }
 
     /**
      * Allows a raider to exit their Flaunch tokenId from the raid, transferring it back
      * into their wallet.
      *
-     * @param _tokenId The Flaunch tokenId being transferred out
+     * @param _flaunchToken The Flaunch token being transferred out
      */
-    function exitRaid(uint _tokenId) public {
+    function exitRaid(FlaunchToken calldata _flaunchToken) public {
         // Confirm original owner
-        if (msg.sender != raiders[_tokenId]) {
+        if (msg.sender != raiders[address(_flaunchToken.flaunch)][_flaunchToken.tokenId]) {
             revert InvalidClaimer();
         }
 
         // Remove the raider
-        delete raiders[_tokenId];
+        delete raiders[address(_flaunchToken.flaunch)][_flaunchToken.tokenId];
 
         // Transfer the token back to the original owner
-        flaunch.transferFrom(address(this), msg.sender, _tokenId);
+        _flaunchToken.flaunch.transferFrom(address(this), msg.sender, _flaunchToken.tokenId);
 
-        emit RaidExited(_tokenId);
+        emit RaidExited(address(_flaunchToken.flaunch), _flaunchToken.tokenId);
     }
 
 }

@@ -16,7 +16,6 @@ contract MemecoinTreasuryTest is FlaunchTest {
 
     using PoolIdLibrary for PoolKey;
 
-    TreasuryActionManager internal actionManager;
     BlankAction internal blankAction;
     MemecoinTreasury internal memecoinTreasury;
 
@@ -25,9 +24,6 @@ contract MemecoinTreasuryTest is FlaunchTest {
     constructor () {
         // Deploy our platform
         _deployPlatform();
-
-        // Register our {TreasuryActionManager}
-        actionManager = positionManager.actionManager();
 
         // Register our blank action
         blankAction = new BlankAction();

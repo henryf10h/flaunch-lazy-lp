@@ -14,4 +14,8 @@ interface IFLETH {
 
     function balanceOf(address _owner) external returns (uint);
 
+    function transfer(address _recipient, uint _amount) external returns (bool);
+
+    function transferFrom(address _spender, address _recipient, uint _amount) external returns (bool);
+
 }

@@ -66,7 +66,7 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     IL2ToL2CrossDomainMessenger internal messenger = IL2ToL2CrossDomainMessenger(Predeploys.L2_TO_L2_CROSS_DOMAIN_MESSENGER);
 
     /// The maximum amount of tokens that can be attributed to the Fair Launch
-    uint public constant MAX_FAIR_LAUNCH_TOKENS = 69e27;
+    uint public constant MAX_FAIR_LAUNCH_TOKENS = TokenSupply.INITIAL_SUPPLY;
 
     /// The maximum value of a creator's fee allocation
     uint public constant MAX_CREATOR_ALLOCATION = 100_00;

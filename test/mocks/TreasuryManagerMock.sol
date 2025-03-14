@@ -6,9 +6,9 @@ import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
 
 contract TreasuryManagerMock is TreasuryManager {
 
-    constructor (address _flaunch) TreasuryManager(_flaunch) {}
+    constructor (address _treasuryManagerFactory) TreasuryManager(_treasuryManagerFactory) {}
 
-    function _initialize(uint, bytes calldata) internal override {
+    function _initialize(TreasuryManager.FlaunchToken calldata, bytes calldata) internal override {
         // ..
     }
 

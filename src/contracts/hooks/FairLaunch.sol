@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {AccessControl} from '@openzeppelin/contracts/access/AccessControl.sol';
+
 import {BeforeSwapDelta, toBeforeSwapDelta} from '@uniswap/v4-core/src/types/BeforeSwapDelta.sol';
 import {BalanceDelta, toBalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
 import {Currency} from '@uniswap/v4-core/src/types/Currency.sol';
@@ -13,6 +15,7 @@ import {SafeCast} from '@uniswap/v4-core/src/libraries/SafeCast.sol';
 import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
 import {CurrencySettler} from '@flaunch/libraries/CurrencySettler.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 import {TickFinder} from '@flaunch/types/TickFinder.sol';
 
 
@@ -29,7 +32,7 @@ import {TickFinder} from '@flaunch/types/TickFinder.sol';
  *
  * @dev Based on: https://github.com/fico23/fundraise-hook
  */
-contract FairLaunch {
+contract FairLaunch is AccessControl {
 
     using CurrencySettler for Currency;
     using PoolIdLibrary for PoolKey;
@@ -74,9 +77,6 @@ contract FairLaunch {
     /// Our Uniswap V4 {PoolManager} contract address
     IPoolManager public immutable poolManager;
 
-    /// Our Flaunch {PositionManager} address
-    address public immutable positionManager;
-
     /**
      * Stores our native token.
      *
@@ -85,8 +85,8 @@ contract FairLaunch {
     constructor (IPoolManager _poolManager) {
         poolManager = _poolManager;
 
-        // Set our {PositionManager} as the caller
-        positionManager = msg.sender;
+        // Set our caller to have the default admin of protocol roles
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
     }
 
     /**
@@ -175,7 +175,7 @@ contract FairLaunch {
             // memecoin position
             tickLower = TickFinder.MIN_TICK;
             tickUpper = (info.initialTick - 1).validTick(true);
-            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency1.balanceOf(address(positionManager)) - _tokenFees, false);
+            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency1.balanceOf(msg.sender) - _tokenFees, false);
         } else {
             // ETH position
             tickUpper = (info.initialTick - 1).validTick(true);
@@ -185,7 +185,7 @@ contract FairLaunch {
             // memecoin position
             tickLower = (info.initialTick + 1).validTick(false);
             tickUpper = TickFinder.MAX_TICK;
-            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency0.balanceOf(address(positionManager)) - _tokenFees, true);
+            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency0.balanceOf(msg.sender) - _tokenFees, true);
         }
 
         // Mark our position as closed
@@ -351,11 +351,11 @@ contract FairLaunch {
 
         // Settle the tokens that are required to fill the position
         if (delta.amount0() < 0) {
-            _poolKey.currency0.settle(poolManager, address(positionManager), uint(-int(delta.amount0())), false);
+            _poolKey.currency0.settle(poolManager, msg.sender, uint(-int(delta.amount0())), false);
         }
 
         if (delta.amount1() < 0) {
-            _poolKey.currency1.settle(poolManager, address(positionManager), uint(-int(delta.amount1())), false);
+            _poolKey.currency1.settle(poolManager, msg.sender, uint(-int(delta.amount1())), false);
         }
     }
 
@@ -397,10 +397,10 @@ contract FairLaunch {
     }
 
     /**
-     * Ensures that only the immutable {PositionManager} can call the function.
+     * Ensures that only a {PositionManager} can call the function.
      */
     modifier onlyPositionManager {
-        if (msg.sender != positionManager) revert NotPositionManager();
+        if (!hasRole(ProtocolRoles.POSITION_MANAGER, msg.sender)) revert NotPositionManager();
         _;
     }
 

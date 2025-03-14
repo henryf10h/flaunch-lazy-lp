@@ -13,6 +13,7 @@ import {StateLibrary} from '@uniswap/v4-core/src/libraries/StateLibrary.sol';
 
 import {BidWall} from '@flaunch/bidwall/BidWall.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 
 import {MemecoinMock} from 'test/mocks/MemecoinMock.sol';
 
@@ -29,7 +30,6 @@ contract BidWallTest is FlaunchTest {
     address alice;
     address memecoinTreasury;
 
-    BidWall bidWall;
     MemecoinMock memecoin;
 
     constructor () {
@@ -40,7 +40,7 @@ contract BidWallTest is FlaunchTest {
         address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
         memecoin = MemecoinMock(_memecoin);
 
-        uint256 tokenId = flaunch.tokenId(_memecoin);
+        uint tokenId = flaunch.tokenId(_memecoin);
 
         // Register the treasury
         memecoinTreasury = flaunch.memecoinTreasury(tokenId);
@@ -56,9 +56,6 @@ contract BidWallTest is FlaunchTest {
         WETH.approve(address(poolModifyPosition), type(uint).max);
         WETH.approve(address(poolSwap), type(uint).max);
         vm.stopPrank();
-
-        // Reference our {BidWall} directly
-        bidWall = positionManager.bidWall();
 
         // Set low BidWall threshold for testing
         bidWall.setSwapFeeThreshold(0.001 ether);
@@ -404,6 +401,57 @@ contract BidWallTest is FlaunchTest {
         vm.expectRevert(UNAUTHORIZED);
         bidWall.setSwapFeeThreshold(_newSwapFeeThreshold);
         vm.stopPrank();
+    }
+
+    function test_CanTriggerStaleBidWallLiquidity() public poolHasLiquidity {
+        // Provide the PoolManager with some ETH because otherwise it sulks about being poor
+        // deal(address(WETH), address(poolManager), 1000e27 ether);
+
+        // Skip the FairLaunch from taking place
+        _bypassFairLaunch();
+
+        // Set a really high threshold so that our FairLaunch amount won't surpass it
+        bidWall.setSwapFeeThreshold(100 ether);
+
+        vm.startPrank(alice);
+
+        // Perform a swap that builds fees
+        poolSwap.swap(
+            poolKey,
+            IPoolManager.SwapParams({
+                zeroForOne: false,
+                amountSpecified: -1 ether,
+                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
+            })
+        );
+
+        uint expectedFees = 0.002248410133947398 ether;
+
+        // We will now have fees stored in the BidWall
+        (,,,, uint pendingETHFees, uint cumulativeSwapFees) = bidWall.poolInfo(poolKey.toId());
+        assertEq(pendingETHFees, expectedFees, 'Invalid pendingETHFees');
+        assertEq(cumulativeSwapFees, expectedFees, 'Invalid cumulativeSwapFees');
+
+        // Move past our timeout
+        vm.warp(block.timestamp + bidWall.STALE_TIME_WINDOW());
+
+        // Perform another swap that will trigger the stale liquidity to be added
+        poolSwap.swap(
+            poolKey,
+            IPoolManager.SwapParams({
+                zeroForOne: false,
+                amountSpecified: -1 ether,
+                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
+            })
+        );
+        vm.stopPrank();
+
+        uint nextExpectedFees = 0.002245234892371601 ether;
+
+        // We will now have fees stored in the BidWall, but also some fees moved into a position
+        (,,,, pendingETHFees, cumulativeSwapFees) = bidWall.poolInfo(poolKey.toId());
+        assertEq(pendingETHFees, nextExpectedFees, 'Invalid pendingETHFees');
+        assertEq(cumulativeSwapFees, expectedFees + nextExpectedFees, 'Invalid cumulativeSwapFees');
     }
 
     /// @dev To run this test, comment out the Uniswap V4 Core {PoolManager} `onlyWhenUnlocked` logic

@@ -28,6 +28,7 @@ import {MemecoinTreasury} from '@flaunch/treasury/MemecoinTreasury.sol';
 import {Notifier} from '@flaunch/hooks/Notifier.sol';
 import {StoreKeys} from '@flaunch/types/StoreKeys.sol';
 import {TreasuryActionManager} from '@flaunch/treasury/ActionManager.sol';
+import {UniswapHookEvents} from '@flaunch/libraries/UniswapHookEvents.sol';
 
 import {IFeeCalculator} from '@flaunch-interfaces/IFeeCalculator.sol';
 import {IFlaunch} from '@flaunch-interfaces/IFlaunch.sol';
@@ -90,6 +91,9 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
      * @member protocolFeeRecipient The recipient EOA of all
      * @member flayGovernance The $FLAY token governance address
      * @member feeExemptions The default global FeeExemption values
+     * @member actionManager The {TreasuryActionManager} contract
+     * @member bidWall The {BidWall} contract to be used by the PositionManager
+     * @member fairLaunch The {FairLaunch} contract to be used by the PositionManager
      */
     struct ConstructorParams {
         address nativeToken;
@@ -100,6 +104,9 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         address protocolFeeRecipient;
         address flayGovernance;
         FeeExemptions feeExemptions;
+        TreasuryActionManager actionManager;
+        BidWall bidWall;
+        FairLaunch fairLaunch;
     }
 
     /**
@@ -193,14 +200,14 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         // Register our FeeExemption contract
         feeExemptions = params.feeExemptions;
 
-        // Deploy our BidWall contract and transfer ownership to the protocol owner
-        bidWall = new BidWall(params.nativeToken, address(params.poolManager), params.protocolOwner);
+        // Register our BidWall contract
+        bidWall = params.bidWall;
 
-        // Deploy our FairLaunch logic
-        fairLaunch = new FairLaunch(params.poolManager);
+        // Register our FairLaunch logic
+        fairLaunch = params.fairLaunch;
 
-        // Deploy our ActionManager
-        actionManager = new TreasuryActionManager(params.protocolOwner);
+        // Register our ActionManager
+        actionManager = params.actionManager;
 
         // Deploy our notifier
         notifier = new Notifier(params.protocolOwner);
@@ -294,6 +301,11 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
          * [FL] At token creation, x% of token supply is put into a one-sided position.
          */
 
+        // We don't currently require any token approval to create a fair launch position, but
+        // when the position closes, the {FairLaunch} contract will supply the {PoolManager}
+        // with tokens from this contract.
+        IMemecoin(memecoin_).approve(address(fairLaunch), type(uint).max);
+
         if (_params.initialTokenFairLaunch != 0) {
             fairLaunch.createPosition(
                 poolId,
@@ -301,11 +313,6 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
                 _params.flaunchAt > block.timestamp ? _params.flaunchAt : block.timestamp,
                 _params.initialTokenFairLaunch
             );
-
-            // We don't currently require any token approval to create a fair launch position, but
-            // when the position closes, the {FairLaunch} contract will supply the {PoolManager}
-            // with tokens from this contract.
-            IMemecoin(memecoin_).approve(address(fairLaunch), type(uint).max);
         }
 
         /**
@@ -570,6 +577,14 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         // Capture the beforeSwap tick value before actioning our Uniswap swap
         (, _beforeSwapTick,,) = poolManager.getSlot0(_key.toId());
 
+        // Check if the BidWall has become stale, and allow liquidity to be extracted before a
+        // threshold has been built.
+        bidWall.checkStalePosition({
+            _poolKey: _key,
+            _currentTick: _beforeSwapTick,
+            _nativeIsZero: nativeToken == Currency.unwrap(_key.currency0)
+        });
+
         // Set our return selector
         selector_ = IHooks.beforeSwap.selector;
     }
@@ -645,7 +660,7 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         selector_ = IHooks.afterSwap.selector;
 
         // Emit our compiled swap data
-        _emitSwapUpdate(poolId);
+        _emitSwapUpdate(poolId, _sender);
 
         // Emit our pool state update to listeners
         _emitPoolStateUpdate(poolId, selector_, abi.encode(_sender, _params, _delta));
@@ -983,14 +998,26 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
      * the breakdown of fees earned at each swap point.
      *
      * @param _poolId The PoolId that is being emitted
+     * @param _sender The router of the swap
      */
-    function _emitSwapUpdate(PoolId _poolId) internal {
+    function _emitSwapUpdate(PoolId _poolId, address _sender) internal {
+        // Emit our protocol-recognised event
         emit PoolSwap(
             _poolId,
             _tload(TS_FL_AMOUNT0), _tload(TS_FL_AMOUNT1), _tload(TS_FL_FEE0), _tload(TS_FL_FEE1),
             _tload(TS_ISP_AMOUNT0), _tload(TS_ISP_AMOUNT1), _tload(TS_ISP_FEE0), _tload(TS_ISP_FEE1),
             _tload(TS_UNI_AMOUNT0), _tload(TS_UNI_AMOUNT1), _tload(TS_UNI_FEE0), _tload(TS_UNI_FEE1)
         );
+
+        // Emit the Uniswap V4 standardised event
+        UniswapHookEvents.emitHookSwapEvent({
+            _poolId: _poolId,
+            _sender: _sender,
+            _amount0: _tload(TS_FL_AMOUNT0) + _tload(TS_ISP_AMOUNT0),
+            _amount1: _tload(TS_FL_AMOUNT1) + _tload(TS_ISP_AMOUNT1),
+            _fee0: _tload(TS_FL_FEE0) + _tload(TS_ISP_FEE0),
+            _fee1: _tload(TS_FL_FEE1) + _tload(TS_ISP_FEE1)
+        });
 
         // @dev We flush the tstore values at this point as although they are only set
         // explicitly and not modified, both the FL and ISP could be bypassed but the tstore

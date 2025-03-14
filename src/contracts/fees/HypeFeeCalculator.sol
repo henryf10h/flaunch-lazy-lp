@@ -13,6 +13,8 @@ import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 import {FullMath} from '@uniswap/v4-core/src/libraries/FullMath.sol';
 
 import {FairLaunch} from '@flaunch/hooks/FairLaunch.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
+
 import {IFeeCalculator} from '@flaunch-interfaces/IFeeCalculator.sol';
 
 
@@ -58,9 +60,6 @@ contract HypeFeeCalculator is IFeeCalculator, Ownable {
     /// The FairLaunch contract reference
     FairLaunch public immutable fairLaunch;
 
-    /// The PositionManager contract reference
-    address public immutable positionManager;
-
     /// Our native token
     address public immutable nativeToken;
 
@@ -83,9 +82,6 @@ contract HypeFeeCalculator is IFeeCalculator, Ownable {
         fairLaunch = _fairLaunch;
         nativeToken = _nativeToken;
 
-        // Find the {PositionManager} used by the {FairLaunch} contract
-        positionManager = _fairLaunch.positionManager();
-
         _initializeOwner(msg.sender);
     }
 
@@ -104,7 +100,10 @@ contract HypeFeeCalculator is IFeeCalculator, Ownable {
 
         // Ensure that this call is coming from the {PositionManager} and validate the
         // value passed.
-        if (msg.sender != positionManager) revert CallerNotPositionManager();
+        if (!fairLaunch.hasRole(ProtocolRoles.POSITION_MANAGER, msg.sender)) {
+            revert CallerNotPositionManager();
+        }
+
         if (_targetTokensPerSec == 0) {
             poolInfos[_poolId].isHypeFeeEnabled = false;
         } else {
@@ -192,7 +191,9 @@ contract HypeFeeCalculator is IFeeCalculator, Ownable {
         bytes calldata /* _hookData */
     ) external override {
         // Ensure that this call is coming from the {PositionManager}
-        if (msg.sender != positionManager) revert CallerNotPositionManager();
+        if (!fairLaunch.hasRole(ProtocolRoles.POSITION_MANAGER, msg.sender)) {
+            revert CallerNotPositionManager();
+        }
 
         // Load our PoolInfo, opened as storage to update values
         PoolId poolId = _key.toId();

@@ -4,51 +4,19 @@
       "type": "constructor",
       "inputs": [
         {
-          "name": "_flaunch",
+          "name": "_treasuryManagerFactory",
           "type": "address",
           "internalType": "address"
+        },
+        {
+          "name": "_flayBurner",
+          "type": "address",
+          "internalType": "address payable"
         },
         {
           "name": "_airdropClaim",
           "type": "address",
           "internalType": "address"
-        },
-        {
-          "name": "_poolSwap",
-          "type": "address",
-          "internalType": "address"
-        },
-        {
-          "name": "_flayPoolKey",
-          "type": "tuple",
-          "internalType": "struct PoolKey",
-          "components": [
-            {
-              "name": "currency0",
-              "type": "address",
-              "internalType": "Currency"
-            },
-            {
-              "name": "currency1",
-              "type": "address",
-              "internalType": "Currency"
-            },
-            {
-              "name": "fee",
-              "type": "uint24",
-              "internalType": "uint24"
-            },
-            {
-              "name": "tickSpacing",
-              "type": "int24",
-              "internalType": "int24"
-            },
-            {
-              "name": "hooks",
-              "type": "address",
-              "internalType": "contract IHooks"
-            }
-          ]
         }
       ],
       "stateMutability": "nonpayable"
@@ -56,19 +24,6 @@
     {
       "type": "receive",
       "stateMutability": "payable"
-    },
-    {
-      "type": "function",
-      "name": "BURN_ADDRESS",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "address",
-          "internalType": "address"
-        }
-      ],
-      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -111,13 +66,6 @@
     },
     {
       "type": "function",
-      "name": "cancelOwnershipHandover",
-      "inputs": [],
-      "outputs": [],
-      "stateMutability": "payable"
-    },
-    {
-      "type": "function",
       "name": "claim",
       "inputs": [],
       "outputs": [],
@@ -151,25 +99,24 @@
     },
     {
       "type": "function",
-      "name": "completeOwnershipHandover",
-      "inputs": [
-        {
-          "name": "pendingOwner",
-          "type": "address",
-          "internalType": "address"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "payable"
-    },
-    {
-      "type": "function",
       "name": "exitRaid",
       "inputs": [
         {
-          "name": "_tokenId",
-          "type": "uint256",
-          "internalType": "uint256"
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         }
       ],
       "outputs": [],
@@ -177,53 +124,31 @@
     },
     {
       "type": "function",
-      "name": "flaunch",
+      "name": "flaunchToken",
       "inputs": [],
       "outputs": [
         {
-          "name": "",
+          "name": "flaunch",
           "type": "address",
           "internalType": "contract Flaunch"
+        },
+        {
+          "name": "tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
         }
       ],
       "stateMutability": "view"
     },
     {
       "type": "function",
-      "name": "flayPoolKey",
+      "name": "flayBurner",
       "inputs": [],
       "outputs": [
         {
           "name": "",
-          "type": "tuple",
-          "internalType": "struct PoolKey",
-          "components": [
-            {
-              "name": "currency0",
-              "type": "address",
-              "internalType": "Currency"
-            },
-            {
-              "name": "currency1",
-              "type": "address",
-              "internalType": "Currency"
-            },
-            {
-              "name": "fee",
-              "type": "uint24",
-              "internalType": "uint24"
-            },
-            {
-              "name": "tickSpacing",
-              "type": "int24",
-              "internalType": "int24"
-            },
-            {
-              "name": "hooks",
-              "type": "address",
-              "internalType": "contract IHooks"
-            }
-          ]
+          "type": "address",
+          "internalType": "contract FlayBurner"
         }
       ],
       "stateMutability": "view"
@@ -233,9 +158,21 @@
       "name": "initialize",
       "inputs": [
         {
-          "name": "_tokenId",
-          "type": "uint256",
-          "internalType": "uint256"
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         },
         {
           "name": "_owner",
@@ -256,13 +193,38 @@
       "name": "joinRaid",
       "inputs": [
         {
-          "name": "_tokenId",
-          "type": "uint256",
-          "internalType": "uint256"
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         }
       ],
       "outputs": [],
       "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "managerOwner",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -292,53 +254,13 @@
     },
     {
       "type": "function",
-      "name": "owner",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "result",
-          "type": "address",
-          "internalType": "address"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
-      "name": "ownershipHandoverExpiresAt",
-      "inputs": [
-        {
-          "name": "pendingOwner",
-          "type": "address",
-          "internalType": "address"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "result",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
-      "name": "poolSwap",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "address",
-          "internalType": "contract IPoolSwap"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
       "name": "raiders",
       "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "internalType": "address"
+        },
         {
           "name": "_tokenId",
           "type": "uint256",
@@ -370,26 +292,24 @@
     },
     {
       "type": "function",
-      "name": "renounceOwnership",
-      "inputs": [],
-      "outputs": [],
-      "stateMutability": "payable"
-    },
-    {
-      "type": "function",
-      "name": "requestOwnershipHandover",
-      "inputs": [],
-      "outputs": [],
-      "stateMutability": "payable"
-    },
-    {
-      "type": "function",
       "name": "rescue",
       "inputs": [
         {
           "name": "",
-          "type": "uint256",
-          "internalType": "uint256"
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         },
         {
           "name": "",
@@ -415,21 +335,13 @@
     },
     {
       "type": "function",
-      "name": "tokenId",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
       "name": "tokenTimelock",
       "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "internalType": "address"
+        },
         {
           "name": "_tokenId",
           "type": "uint256",
@@ -450,22 +362,41 @@
       "name": "transferOwnership",
       "inputs": [
         {
-          "name": "newOwner",
+          "name": "_newManagerOwner",
           "type": "address",
           "internalType": "address"
         }
       ],
       "outputs": [],
-      "stateMutability": "payable"
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "treasuryManagerFactory",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract TreasuryManagerFactory"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "event",
       "name": "ManagerInitialized",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
-          "indexed": false,
+          "indexed": true,
           "internalType": "uint256"
         },
         {
@@ -496,12 +427,37 @@
     },
     {
       "type": "event",
+      "name": "ManagerOwnershipTransferred",
+      "inputs": [
+        {
+          "name": "_previousOwner",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "_newOwner",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "OnboardeeClaim",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
-          "indexed": false,
+          "indexed": true,
           "internalType": "uint256"
         },
         {
@@ -536,9 +492,15 @@
       "name": "OnboardeeReleased",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
-          "indexed": false,
+          "indexed": true,
           "internalType": "uint256"
         },
         {
@@ -571,78 +533,14 @@
     },
     {
       "type": "event",
-      "name": "OnboardingMarketBuy",
-      "inputs": [
-        {
-          "name": "_tokenId",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "_flethSpent",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "_flayBurned",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
-      "name": "OwnershipHandoverCanceled",
-      "inputs": [
-        {
-          "name": "pendingOwner",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
-      "name": "OwnershipHandoverRequested",
-      "inputs": [
-        {
-          "name": "pendingOwner",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
-      "name": "OwnershipTransferred",
-      "inputs": [
-        {
-          "name": "oldOwner",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        },
-        {
-          "name": "newOwner",
-          "type": "address",
-          "indexed": true,
-          "internalType": "address"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
       "name": "RaidExited",
       "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
         {
           "name": "_tokenId",
           "type": "uint256",
@@ -657,6 +555,12 @@
       "name": "RaidJoined",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
           "indexed": false,
@@ -669,6 +573,12 @@
       "type": "event",
       "name": "TreasuryEscrowed",
       "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
         {
           "name": "_tokenId",
           "type": "uint256",
@@ -695,6 +605,12 @@
       "name": "TreasuryReclaimed",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
           "indexed": true,
@@ -720,6 +636,12 @@
       "name": "TreasuryTimelocked",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
           "name": "_tokenId",
           "type": "uint256",
           "indexed": true,
@@ -736,17 +658,12 @@
     },
     {
       "type": "error",
-      "name": "AlreadyInitialized",
-      "inputs": []
-    },
-    {
-      "type": "error",
-      "name": "CannotBeZeroAddress",
-      "inputs": []
-    },
-    {
-      "type": "error",
       "name": "CannotRescueToken",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "FlaunchContractNotValid",
       "inputs": []
     },
     {
@@ -766,12 +683,7 @@
     },
     {
       "type": "error",
-      "name": "NewOwnerIsZeroAddress",
-      "inputs": []
-    },
-    {
-      "type": "error",
-      "name": "NoHandoverRequest",
+      "name": "NotManagerOwner",
       "inputs": []
     },
     {
@@ -801,14 +713,31 @@
     },
     {
       "type": "error",
-      "name": "TokenIdAlreadySet",
+      "name": "TokenAlreadySet",
       "inputs": [
         {
-          "name": "_tokenId",
-          "type": "uint256",
-          "internalType": "uint256"
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
         }
       ]
+    },
+    {
+      "type": "error",
+      "name": "TokenNotSet",
+      "inputs": []
     },
     {
       "type": "error",
@@ -820,11 +749,6 @@
           "internalType": "uint256"
         }
       ]
-    },
-    {
-      "type": "error",
-      "name": "Unauthorized",
-      "inputs": []
     }
   ]
 }

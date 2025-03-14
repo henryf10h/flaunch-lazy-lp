@@ -3,10 +3,15 @@ pragma solidity ^0.8.26;
 
 import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
 
+import {Flaunch} from '@flaunch/Flaunch.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
+import {RevenueManager} from '@flaunch/treasury/managers/RevenueManager.sol';
+import {SingleTokenManager} from '@flaunch/treasury/managers/SingleTokenManager.sol';
 import {TreasuryManagerFactory} from '@flaunch/treasury/managers/TreasuryManagerFactory.sol';
 import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
-import {RevenueManager} from '@flaunch/treasury/managers/RevenueManager.sol';
+
+import {ITreasuryManager} from '@flaunch-interfaces/ITreasuryManager.sol';
 
 import {FlaunchTest} from 'test/FlaunchTest.sol';
 
@@ -36,7 +41,8 @@ contract RevenueManagerTest is FlaunchTest {
         // Set up our {TreasuryManagerFactory} and approve our implementation
         vm.startPrank(owner);
         factory = new TreasuryManagerFactory(owner);
-        managerImplementation = address(new RevenueManager(address(flaunch)));
+        factory.grantRole(ProtocolRoles.FLAUNCH, address(flaunch));
+        managerImplementation = address(new RevenueManager(address(factory)));
         factory.approveManager(managerImplementation);
 
         // Get the tokenId from the memecoin address
@@ -51,7 +57,10 @@ contract RevenueManagerTest is FlaunchTest {
 
         // Initialize a testing token
         revenueManager.initialize({
-            _tokenId: tokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId
+            }),
             _owner: owner,
             _data: abi.encode(
                 RevenueManager.InitializeParams(nonOwner, protocolRecipient, VALID_PROTOCOL_FEE)
@@ -80,18 +89,24 @@ contract RevenueManagerTest is FlaunchTest {
         );
 
         vm.expectEmit();
-        emit TreasuryManager.TreasuryEscrowed(newTokenId, address(this), address(this));
-        emit RevenueManager.ManagerInitialized(newTokenId, params);
+        emit TreasuryManager.TreasuryEscrowed(address(flaunch), newTokenId, address(this), address(this));
+        emit RevenueManager.ManagerInitialized(address(flaunch), newTokenId, params);
 
         revenueManager.initialize({
-            _tokenId: newTokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: newTokenId
+            }),
             _owner: address(this),
             _data: abi.encode(params)
         });
 
         // Confirm that initial values are set
-        assertEq(revenueManager.tokenId(), newTokenId);
-        assertEq(revenueManager.owner(), address(this));
+        (Flaunch _flaunch, uint _tokenId) = revenueManager.flaunchToken();
+        assertEq(address(_flaunch), address(flaunch));
+        assertEq(_tokenId, newTokenId);
+
+        assertEq(revenueManager.managerOwner(), address(this));
         assertEq(revenueManager.creator(), _creator);
         assertEq(revenueManager.protocolRecipient(), _protocolRecipient);
         assertEq(revenueManager.protocolFee(), _protocolFee);
@@ -105,7 +120,10 @@ contract RevenueManagerTest is FlaunchTest {
     function test_CannotInitializeWithUnownedToken() public freshManager {
         vm.expectRevert();
         revenueManager.initialize({
-            _tokenId: 123,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: 123
+            }),
             _owner: owner,
             _data: abi.encode(
                 RevenueManager.InitializeParams(nonOwner, protocolRecipient, VALID_PROTOCOL_FEE)
@@ -124,9 +142,15 @@ contract RevenueManagerTest is FlaunchTest {
         // Deploy our {RevenueManager} implementation and transfer our tokenId
         flaunch.approve(address(revenueManager), newTokenId);
 
-        vm.expectRevert(abi.encodeWithSelector(RevenueManager.TokenIdAlreadySet.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(
+            SingleTokenManager.TokenAlreadySet.selector,
+            ITreasuryManager.FlaunchToken(flaunch, tokenId))
+        );
         revenueManager.initialize({
-            _tokenId: newTokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: newTokenId
+            }),
             _owner: address(this),
             _data: abi.encode(
                 RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, VALID_PROTOCOL_FEE)
@@ -149,7 +173,10 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.expectRevert(RevenueManager.InvalidCreatorAddress.selector);
         revenueManager.initialize({
-            _tokenId: newTokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: newTokenId
+            }),
             _owner: address(this),
             _data: abi.encode(
                 RevenueManager.InitializeParams(payable(address(0)), _protocolRecipient, _protocolFee)
@@ -173,7 +200,10 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.expectRevert(RevenueManager.InvalidProtocolFee.selector);
         revenueManager.initialize({
-            _tokenId: newTokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: newTokenId
+            }),
             _owner: address(this),
             _data: abi.encode(
                 RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, _protocolFee)
@@ -328,7 +358,7 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.startPrank(_caller);
 
-        vm.expectRevert(UNAUTHORIZED);
+        vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
         revenueManager.setProtocolRecipient(protocolRecipient);
 
         vm.stopPrank();
@@ -379,7 +409,7 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.startPrank(_caller);
 
-        vm.expectRevert(UNAUTHORIZED);
+        vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
         revenueManager.setProtocolRecipient(protocolRecipient);
 
         vm.stopPrank();
@@ -426,7 +456,7 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.startPrank(_caller);
 
-        vm.expectRevert(UNAUTHORIZED);
+        vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
         revenueManager.setCreator(_caller);
 
         vm.stopPrank();
@@ -447,10 +477,13 @@ contract RevenueManagerTest is FlaunchTest {
 
         // Track the reclaim event
         vm.expectEmit();
-        emit TreasuryManager.TreasuryReclaimed(tokenId, owner, _recipient);
+        emit TreasuryManager.TreasuryReclaimed(address(flaunch), tokenId, owner, _recipient);
 
         vm.prank(owner);
-        revenueManager.rescue(tokenId, _recipient);
+        revenueManager.rescue(
+            ITreasuryManager.FlaunchToken(flaunch, tokenId),
+            _recipient
+        );
 
         // Confirm the recipient is now the owner
         assertEq(flaunch.ownerOf(tokenId), _recipient);
@@ -464,7 +497,10 @@ contract RevenueManagerTest is FlaunchTest {
         vm.startPrank(owner);
 
         vm.expectRevert();
-        revenueManager.rescue(123, owner);
+        revenueManager.rescue(
+            ITreasuryManager.FlaunchToken(flaunch, 123),
+            owner
+        );
 
         vm.stopPrank();
     }
@@ -479,8 +515,11 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.startPrank(_caller);
 
-        vm.expectRevert(UNAUTHORIZED);
-        revenueManager.rescue(tokenId, _caller);
+        vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
+        revenueManager.rescue(
+            ITreasuryManager.FlaunchToken(flaunch, tokenId),
+            _caller
+        );
 
         vm.stopPrank();
     }
@@ -492,12 +531,21 @@ contract RevenueManagerTest is FlaunchTest {
      */
     function test_CannotAddNewERC721AfterRescue() public {
         vm.prank(owner);
-        revenueManager.rescue(tokenId, address(this));
+        revenueManager.rescue(
+            ITreasuryManager.FlaunchToken(flaunch, tokenId),
+            address(this)
+        );
 
         flaunch.approve(address(revenueManager), tokenId);
-        vm.expectRevert(abi.encodeWithSelector(RevenueManager.TokenIdAlreadySet.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(
+            SingleTokenManager.TokenAlreadySet.selector,
+            ITreasuryManager.FlaunchToken(flaunch, tokenId)
+        ));
         revenueManager.initialize({
-            _tokenId: tokenId,
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId
+            }),
             _owner: address(this),
             _data: abi.encode(
                 RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, VALID_PROTOCOL_FEE)
