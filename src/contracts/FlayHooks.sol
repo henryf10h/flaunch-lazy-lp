@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Ownable} from '@solady/auth/Ownable.sol';
+
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 import {BalanceDelta} from '@uniswap/v4-core/src/types/BalanceDelta.sol';
@@ -290,6 +291,14 @@ contract FlayHooks is BaseHook, InternalSwapPool, Ownable {
         }
     }
 
+    /**
+     * Allows the owner to update the {FlayBurner} contract address.
+     *
+     * @dev This can be set to a zero-address to bypass the FlayBurner and instead send
+     * fees to the BidWall.
+     *
+     * @param _flayBurner The new {FlayBurner} contract address
+     */
     function setFlayBurner(address _flayBurner) external onlyOwner {
         flayBurner = payable(_flayBurner);
     }

@@ -13,7 +13,7 @@ forge install foundry-rs/forge-std
 ## Contracts
 ### stdError
 
-This is a helper contract for errors and reverts. In Forge, this contract is particularly helpful for the `expectRevert` cheatcode, as it provides all compiler builtin errors.
+This is a helper contract for errors and reverts. In Forge, this contract is particularly helpful for the `expectRevert` cheatcode, as it provides all compiler built-in errors.
 
 See the contract itself for all error codes.
 
@@ -38,7 +38,7 @@ contract TestContract is Test {
 
 contract ErrorsTest {
     function arithmeticError(uint256 a) public {
-        uint256 a = a - 100;
+        a = a - 100;
     }
 }
 ```

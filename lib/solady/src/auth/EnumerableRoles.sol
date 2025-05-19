@@ -206,7 +206,7 @@ abstract contract EnumerableRoles {
 
     /// @dev Checks that the caller is authorized to set the role.
     function _authorizeSetRole(address holder, uint256 role, bool active) internal virtual {
-        if (!_senderIsContractOwner()) _revertEnumerableRolesUnauthorized();
+        if (!_enumerableRolesSenderIsContractOwner()) _revertEnumerableRolesUnauthorized();
         // Silence compiler warning on unused variables.
         (holder, role, active) = (holder, role, active);
     }
@@ -233,24 +233,47 @@ abstract contract EnumerableRoles {
         }
     }
 
-    /// @dev Throws if the sender does not have any roles in `encodedRoles`.
+    /// @dev Reverts if `msg.sender` does not have `role`.
+    function _checkRole(uint256 role) internal view virtual {
+        if (!hasRole(msg.sender, role)) _revertEnumerableRolesUnauthorized();
+    }
+
+    /// @dev Reverts if `msg.sender` does not have any role in `encodedRoles`.
     function _checkRoles(bytes memory encodedRoles) internal view virtual {
         if (!_hasAnyRoles(msg.sender, encodedRoles)) _revertEnumerableRolesUnauthorized();
     }
 
-    /// @dev Throws if the sender does not have any roles in `encodedRoles`.
+    /// @dev Reverts if `msg.sender` is not the contract owner and does not have `role`.
+    function _checkOwnerOrRole(uint256 role) internal view virtual {
+        if (!_enumerableRolesSenderIsContractOwner()) _checkRole(role);
+    }
+
+    /// @dev Reverts if `msg.sender` is not the contract owner and
+    /// does not have any role in `encodedRoles`.
     function _checkOwnerOrRoles(bytes memory encodedRoles) internal view virtual {
-        if (!_senderIsContractOwner()) _checkRoles(encodedRoles);
+        if (!_enumerableRolesSenderIsContractOwner()) _checkRoles(encodedRoles);
     }
 
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
     /*                         MODIFIERS                          */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
+    /// @dev Marks a function as only callable by an account with `role`.
+    modifier onlyRole(uint256 role) virtual {
+        _checkRole(role);
+        _;
+    }
+
     /// @dev Marks a function as only callable by an account with any role in `encodedRoles`.
     /// `encodedRoles` is `abi.encode(SAMPLE_ROLE_0, SAMPLE_ROLE_1, ...)`.
     modifier onlyRoles(bytes memory encodedRoles) virtual {
         _checkRoles(encodedRoles);
+        _;
+    }
+
+    /// @dev Marks a function as only callable by the owner or by an account with `role`.
+    modifier onlyOwnerOrRole(uint256 role) virtual {
+        _checkOwnerOrRole(role);
         _;
     }
 
@@ -269,7 +292,7 @@ abstract contract EnumerableRoles {
 
     /// @dev Returns if the `msg.sender` is equal to `owner()` on this contract.
     /// If the contract does not have `owner()` implemented, returns false.
-    function _senderIsContractOwner() private view returns (bool result) {
+    function _enumerableRolesSenderIsContractOwner() private view returns (bool result) {
         /// @solidity memory-safe-assembly
         assembly {
             mstore(0x00, 0x8da5cb5b) // `owner()`.

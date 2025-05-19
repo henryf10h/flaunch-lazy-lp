@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/clean"
+	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/upgrade"
+	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/verify"
+
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer"
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/bootstrap"
 	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/inspect"
@@ -43,6 +47,12 @@ func main() {
 			Action: deployer.ApplyCLI(),
 		},
 		{
+			Name:        "upgrade",
+			Usage:       "upgrades contracts by sending tx to OPCM.upgrade function",
+			Flags:       cliapp.ProtectFlags(deployer.UpgradeFlags),
+			Subcommands: upgrade.Commands,
+		},
+		{
 			Name:        "bootstrap",
 			Usage:       "bootstraps global contract instances",
 			Subcommands: bootstrap.Commands,
@@ -51,6 +61,17 @@ func main() {
 			Name:        "inspect",
 			Usage:       "inspects the state of a deployment",
 			Subcommands: inspect.Commands,
+		},
+		{
+			Name:        "clean",
+			Usage:       "cleans up various things",
+			Subcommands: clean.Commands,
+		},
+		{
+			Name:   "verify",
+			Usage:  "verifies deployed contracts on Etherscan",
+			Flags:  cliapp.ProtectFlags(deployer.VerifyFlags),
+			Action: verify.VerifyCLI,
 		},
 	}
 	app.Writer = os.Stdout

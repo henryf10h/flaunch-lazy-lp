@@ -9,12 +9,13 @@ import { ERC721 } from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 // Libraries
 import { Predeploys } from "src/libraries/Predeploys.sol";
+import { EIP1967Helper } from "test/mocks/EIP1967Helper.sol";
 
 // Interfaces
-import { ISuperchainConfig } from "src/L1/interfaces/ISuperchainConfig.sol";
-import { ICrossDomainMessenger } from "src/universal/interfaces/ICrossDomainMessenger.sol";
-import { IL1ERC721Bridge } from "src/L1/interfaces/IL1ERC721Bridge.sol";
-import { IL2ERC721Bridge } from "src/L2/interfaces/IL2ERC721Bridge.sol";
+import { ISuperchainConfig } from "interfaces/L1/ISuperchainConfig.sol";
+import { ICrossDomainMessenger } from "interfaces/universal/ICrossDomainMessenger.sol";
+import { IL1ERC721Bridge } from "interfaces/L1/IL1ERC721Bridge.sol";
+import { IL2ERC721Bridge } from "interfaces/L2/IL2ERC721Bridge.sol";
 
 /// @dev Test ERC721 contract.
 contract TestERC721 is ERC721 {
@@ -69,12 +70,15 @@ contract L1ERC721Bridge_Test is CommonTest {
     /// @notice Marked virtual to be overridden in
     ///         test/kontrol/deployment/DeploymentSummary.t.sol
     function test_constructor_succeeds() public virtual {
-        IL1ERC721Bridge impl = IL1ERC721Bridge(deploy.mustGetAddress("L1ERC721Bridge"));
+        IL1ERC721Bridge impl = IL1ERC721Bridge(EIP1967Helper.getImplementation(address(l1ERC721Bridge)));
         assertEq(address(impl.MESSENGER()), address(0));
         assertEq(address(impl.messenger()), address(0));
-        assertEq(address(impl.OTHER_BRIDGE()), Predeploys.L2_ERC721_BRIDGE);
-        assertEq(address(impl.otherBridge()), Predeploys.L2_ERC721_BRIDGE);
         assertEq(address(impl.superchainConfig()), address(0));
+
+        // The constructor now uses _disableInitializers, whereas OP Mainnet has the other bridge in storage
+        returnIfForkTest("L1ERC721Bridge_Test: impl storage differs on forked network");
+        assertEq(address(impl.OTHER_BRIDGE()), address(0));
+        assertEq(address(impl.otherBridge()), address(0));
     }
 
     /// @dev Tests that the proxy is initialized with the correct values.
@@ -87,7 +91,7 @@ contract L1ERC721Bridge_Test is CommonTest {
     }
 
     /// @dev Tests that the ERC721 can be bridged successfully.
-    function test_bridgeERC721_succeeds() public {
+    function test_bridgeERC721_fromEOA_succeeds() public {
         // Expect a call to the messenger.
         vm.expectCall(
             address(l1CrossDomainMessenger),
@@ -107,6 +111,40 @@ contract L1ERC721Bridge_Test is CommonTest {
         // Expect an event to be emitted.
         vm.expectEmit(true, true, true, true);
         emit ERC721BridgeInitiated(address(localToken), address(remoteToken), alice, alice, tokenId, hex"5678");
+
+        // Bridge the token.
+        vm.prank(alice, alice);
+        l1ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
+
+        // Token is locked in the bridge.
+        assertEq(l1ERC721Bridge.deposits(address(localToken), address(remoteToken), tokenId), true);
+        assertEq(localToken.ownerOf(tokenId), address(l1ERC721Bridge));
+    }
+
+    /// @dev Tests that the ERC721 can be bridged successfully.
+    function test_bridgeERC721_fromEOA7702_succeeds() public {
+        // Expect a call to the messenger.
+        vm.expectCall(
+            address(l1CrossDomainMessenger),
+            abi.encodeCall(
+                l1CrossDomainMessenger.sendMessage,
+                (
+                    address(l2ERC721Bridge),
+                    abi.encodeCall(
+                        IL2ERC721Bridge.finalizeBridgeERC721,
+                        (address(remoteToken), address(localToken), alice, alice, tokenId, hex"5678")
+                    ),
+                    1234
+                )
+            )
+        );
+
+        // Expect an event to be emitted.
+        vm.expectEmit(true, true, true, true);
+        emit ERC721BridgeInitiated(address(localToken), address(remoteToken), alice, alice, tokenId, hex"5678");
+
+        // Set alice to have 7702 code.
+        vm.etch(alice, abi.encodePacked(hex"EF0100", address(0)));
 
         // Bridge the token.
         vm.prank(alice);
@@ -133,7 +171,7 @@ contract L1ERC721Bridge_Test is CommonTest {
     /// @dev Tests that the ERC721 bridge reverts for a zero address local token.
     function test_bridgeERC721_localTokenZeroAddress_reverts() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         vm.expectRevert(bytes(""));
         l1ERC721Bridge.bridgeERC721(address(0), address(remoteToken), tokenId, 1234, hex"5678");
 
@@ -145,7 +183,7 @@ contract L1ERC721Bridge_Test is CommonTest {
     /// @dev Tests that the ERC721 bridge reverts for a zero address remote token.
     function test_bridgeERC721_remoteTokenZeroAddress_reverts() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         vm.expectRevert("L1ERC721Bridge: remote token cannot be address(0)");
         l1ERC721Bridge.bridgeERC721(address(localToken), address(0), tokenId, 1234, hex"5678");
 
@@ -157,7 +195,7 @@ contract L1ERC721Bridge_Test is CommonTest {
     /// @dev Tests that the ERC721 bridge reverts for an incorrect owner.
     function test_bridgeERC721_wrongOwner_reverts() external {
         // Bridge the token.
-        vm.prank(bob);
+        vm.prank(bob, bob);
         vm.expectRevert("ERC721: transfer from incorrect owner");
         l1ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
 
@@ -248,7 +286,7 @@ contract L1ERC721Bridge_Test is CommonTest {
     /// @dev Tests that the ERC721 bridge successfully finalizes a withdrawal.
     function test_finalizeBridgeERC721_succeeds() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         l1ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
 
         // Expect an event to be emitted.

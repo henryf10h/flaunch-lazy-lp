@@ -34,10 +34,12 @@ enum Fork {
     ECOTONE,
     FJORD,
     GRANITE,
-    HOLOCENE
+    HOLOCENE,
+    ISTHMUS,
+    JOVIAN
 }
 
-Fork constant LATEST_FORK = Fork.HOLOCENE;
+Fork constant LATEST_FORK = Fork.JOVIAN;
 
 library ForkUtils {
     function toString(Fork _fork) internal pure returns (string memory) {
@@ -53,6 +55,10 @@ library ForkUtils {
             return "granite";
         } else if (_fork == Fork.HOLOCENE) {
             return "holocene";
+        } else if (_fork == Fork.ISTHMUS) {
+            return "isthmus";
+        } else if (_fork == Fork.JOVIAN) {
+            return "jovian";
         } else {
             return "unknown";
         }
@@ -89,13 +95,6 @@ library Config {
     ///         an override.
     function chainID() internal view returns (uint256 env_) {
         env_ = vm.envOr("CHAIN_ID", block.chainid);
-    }
-
-    /// @notice Returns the value of the env var CONTRACT_ADDRESSES_PATH which is a JSON key/value
-    ///         pair of contract names and their addresses. Each key/value pair is passed to `save`
-    ///         which then backs the `getAddress` function.
-    function contractAddressesPath() internal view returns (string memory env_) {
-        env_ = vm.envOr("CONTRACT_ADDRESSES_PATH", string(""));
     }
 
     /// @notice The CREATE2 salt to be used when deploying the implementations.
@@ -168,6 +167,10 @@ library Config {
             return Fork.GRANITE;
         } else if (forkHash == keccak256(bytes("holocene"))) {
             return Fork.HOLOCENE;
+        } else if (forkHash == keccak256(bytes("isthmus"))) {
+            return Fork.ISTHMUS;
+        } else if (forkHash == keccak256(bytes("jovian"))) {
+            return Fork.JOVIAN;
         } else {
             revert(string.concat("Config: unknown fork: ", forkStr));
         }

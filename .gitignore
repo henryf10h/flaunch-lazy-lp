@@ -2,10 +2,10 @@
 cache/
 out/
 
-# Ignores development repo folders
-broadcast/
-node_modules/
-script/
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
 
 # ABI handling
 # First, don't ignore the abi directory itself
@@ -13,21 +13,26 @@ script/
 # Then ignore all contents of abi directory
 /abi/*
 # Finally whitelist specific files
+!/abi/AddressFeeSplitManager.json
 !/abi/AnyFlaunch.json
 !/abi/AnyPositionManager.json
 !/abi/BidWall.json
 !/abi/BurnTokensAction.json
 !/abi/BuyBackAction.json
+!/abi/BuyBackAndBurnFlay.json
 !/abi/ClaimFeesAction.json
 !/abi/DistributeAction.json
 !/abi/DynamicFeeCalculator.json
 !/abi/DynamicFeeCalculatorV2.json
+!/abi/ERC721OwnerFeeSplitManager.json
 !/abi/FairLaunch.json
 !/abi/FastFlaunchZap.json
+!/abi/FeeEscrow.json
 !/abi/FeeExemptions.json
 !/abi/Flaunch.json
 !/abi/FlaunchFeeExemption.json
 !/abi/FlaunchZap.json
+!/abi/FlayBurner.json
 !/abi/FlayHooks.json
 !/abi/HypeFeeCalculator.json
 !/abi/InitialPrice.json
@@ -53,6 +58,12 @@ script/
 !/abi/TreasuryActionManager.json
 !/abi/TreasuryManagerFactory.json
 !/abi/WhitelistFairLaunch.json
+
+# node
+node_modules/
+
+# Docs
+docs/
 
 # Dotenv file
 .env

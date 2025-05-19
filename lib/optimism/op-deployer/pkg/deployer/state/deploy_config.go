@@ -1,8 +1,13 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
+
+	"github.com/ethereum-optimism/optimism/op-deployer/pkg/deployer/standard"
+
+	op_service "github.com/ethereum-optimism/optimism/op-service"
 
 	"github.com/ethereum-optimism/optimism/op-service/jsonutil"
 
@@ -23,6 +28,14 @@ var (
 )
 
 func CombineDeployConfig(intent *Intent, chainIntent *ChainIntent, state *State, chainState *ChainState) (genesis.DeployConfig, error) {
+	upgradeSchedule := standard.DefaultHardforkScheduleForTag(intent.L1ContractsLocator.Tag)
+	if intent.UseInterop {
+		if upgradeSchedule.L2GenesisIsthmusTimeOffset == nil {
+			return genesis.DeployConfig{}, errors.New("expecting isthmus fork to be enabled for interop deployments")
+		}
+		upgradeSchedule.UseInterop = true
+	}
+
 	cfg := genesis.DeployConfig{
 		L1DependenciesConfig: genesis.L1DependenciesConfig{
 			L1StandardBridgeProxy:       chainState.L1StandardBridgeProxyAddress,
@@ -33,6 +46,9 @@ func CombineDeployConfig(intent *Intent, chainIntent *ChainIntent, state *State,
 			ProtocolVersionsProxy:       state.SuperchainDeployment.ProtocolVersionsProxyAddress,
 		},
 		L2InitializationConfig: genesis.L2InitializationConfig{
+			DevDeployConfig: genesis.DevDeployConfig{
+				FundDevAccounts: intent.FundDevAccounts,
+			},
 			L2GenesisBlockDeployConfig: genesis.L2GenesisBlockDeployConfig{
 				L2GenesisBlockGasLimit:      60_000_000,
 				L2GenesisBlockBaseFeePerGas: &l2GenesisBlockBaseFeePerGas,
@@ -49,29 +65,28 @@ func CombineDeployConfig(intent *Intent, chainIntent *ChainIntent, state *State,
 				SequencerFeeVaultRecipient:               chainIntent.SequencerFeeVaultRecipient,
 			},
 			GovernanceDeployConfig: genesis.GovernanceDeployConfig{
-				EnableGovernance:      true,
+				EnableGovernance:      false,
 				GovernanceTokenSymbol: "OP",
 				GovernanceTokenName:   "Optimism",
 				GovernanceTokenOwner:  common.HexToAddress("0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAdDEad"),
 			},
 			GasPriceOracleDeployConfig: genesis.GasPriceOracleDeployConfig{
-				GasPriceOracleBaseFeeScalar:     1368,
-				GasPriceOracleBlobBaseFeeScalar: 810949,
+				GasPriceOracleBaseFeeScalar:       1368,
+				GasPriceOracleBlobBaseFeeScalar:   810949,
+				GasPriceOracleOperatorFeeScalar:   chainIntent.OperatorFeeScalar,
+				GasPriceOracleOperatorFeeConstant: chainIntent.OperatorFeeConstant,
 			},
 			EIP1559DeployConfig: genesis.EIP1559DeployConfig{
 				EIP1559Denominator:       chainIntent.Eip1559Denominator,
 				EIP1559DenominatorCanyon: 250,
 				EIP1559Elasticity:        chainIntent.Eip1559Elasticity,
 			},
-			UpgradeScheduleDeployConfig: genesis.UpgradeScheduleDeployConfig{
-				L2GenesisRegolithTimeOffset: u64UtilPtr(0),
-				L2GenesisCanyonTimeOffset:   u64UtilPtr(0),
-				L2GenesisDeltaTimeOffset:    u64UtilPtr(0),
-				L2GenesisEcotoneTimeOffset:  u64UtilPtr(0),
-				L2GenesisFjordTimeOffset:    u64UtilPtr(0),
-				L2GenesisGraniteTimeOffset:  u64UtilPtr(0),
-				UseInterop:                  intent.UseInterop,
-			},
+
+			// STOP! This struct sets the _default_ upgrade schedule for all chains.
+			// Any upgrades you enable here will be enabled for all new deployments.
+			// In-development hardforks should never be activated here. Instead, they
+			// should be specified as overrides.
+			UpgradeScheduleDeployConfig: *upgradeSchedule,
 			L2CoreDeployConfig: genesis.L2CoreDeployConfig{
 				L1ChainID:                 intent.L1ChainID,
 				L2ChainID:                 chainState.ID.Big().Uint64(),
@@ -103,7 +118,7 @@ func CombineDeployConfig(intent *Intent, chainIntent *ChainIntent, state *State,
 	}
 
 	if intent.UseInterop {
-		cfg.L2InitializationConfig.UpgradeScheduleDeployConfig.L2GenesisInteropTimeOffset = u64UtilPtr(0)
+		cfg.L2InitializationConfig.UpgradeScheduleDeployConfig.L2GenesisInteropTimeOffset = op_service.U64UtilPtr(0)
 	}
 
 	if chainState.StartBlock == nil {
@@ -113,7 +128,7 @@ func CombineDeployConfig(intent *Intent, chainIntent *ChainIntent, state *State,
 			BlockNumber: &num,
 		}
 	} else {
-		startHash := chainState.StartBlock.Hash()
+		startHash := chainState.StartBlock.Hash
 		cfg.L1StartingBlockTag = &genesis.MarshalableRPCBlockNumberOrHash{
 			BlockHash: &startHash,
 		}
@@ -170,11 +185,6 @@ func mustHexBigFromHex(hex string) *hexutil.Big {
 	num := hexutil.MustDecodeBig(hex)
 	hexBig := hexutil.Big(*num)
 	return &hexBig
-}
-
-func u64UtilPtr(in uint64) *hexutil.Uint64 {
-	util := hexutil.Uint64(in)
-	return &util
 }
 
 func calculateBatchInboxAddr(chainID common.Hash) common.Address {

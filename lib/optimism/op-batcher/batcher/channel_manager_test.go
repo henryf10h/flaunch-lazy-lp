@@ -65,19 +65,19 @@ func ChannelManagerReturnsErrReorg(t *testing.T, batchType uint) {
 
 	a := types.NewBlock(&types.Header{
 		Number: big.NewInt(0),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 	b := types.NewBlock(&types.Header{
 		Number:     big.NewInt(1),
 		ParentHash: a.Hash(),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 	c := types.NewBlock(&types.Header{
 		Number:     big.NewInt(2),
 		ParentHash: b.Hash(),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 	x := types.NewBlock(&types.Header{
 		Number:     big.NewInt(2),
 		ParentHash: common.Hash{0xff},
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 
 	require.NoError(t, m.AddL2Block(a))
 	require.NoError(t, m.AddL2Block(b))
@@ -101,9 +101,9 @@ func ChannelManagerReturnsErrReorgWhenDrained(t *testing.T, batchType uint) {
 
 	require.NoError(t, m.AddL2Block(a))
 
-	_, err := m.TxData(eth.BlockID{})
+	_, err := m.TxData(eth.BlockID{}, false)
 	require.NoError(t, err)
-	_, err = m.TxData(eth.BlockID{})
+	_, err = m.TxData(eth.BlockID{}, false)
 	require.ErrorIs(t, err, io.EOF)
 
 	require.ErrorIs(t, m.AddL2Block(x), ErrReorg)
@@ -122,7 +122,7 @@ func ChannelManager_Clear(t *testing.T, batchType uint) {
 	// clearing confirmed transactions, and resetting the pendingChannels map
 	cfg.ChannelTimeout = 10
 	cfg.InitRatioCompressor(1, derive.Zlib)
-	m := NewChannelManager(log, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
+	m := NewChannelManager(log, metrics.NewMetrics("test"), cfg, defaultTestRollupConfig)
 
 	// Channel Manager state should be empty by default
 	require.Empty(m.blocks)
@@ -150,7 +150,6 @@ func ChannelManager_Clear(t *testing.T, batchType uint) {
 
 	// Process the blocks
 	// We should have a pending channel with 1 frame
-
 	require.NoError(m.processBlocks())
 	require.NoError(m.currentChannel.channelBuilder.co.Flush())
 	require.NoError(m.outputFrames())
@@ -166,7 +165,7 @@ func ChannelManager_Clear(t *testing.T, batchType uint) {
 	b := types.NewBlock(&types.Header{
 		Number:     big.NewInt(1),
 		ParentHash: a.Hash(),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 	require.NoError(m.AddL2Block(b))
 	require.Equal(m.blockCursor, len(m.blocks)-1)
 	require.Equal(b.Hash(), m.tip)
@@ -174,6 +173,11 @@ func ChannelManager_Clear(t *testing.T, batchType uint) {
 	safeL1Origin := eth.BlockID{
 		Number: 123,
 	}
+
+	// Artificially pump up some metrics which need to be cleared
+	m.metr.RecordL2BlockInPendingQueue(a)
+	require.NotZero(m.metr.PendingDABytes())
+
 	// Clear the channel manager
 	m.Clear(safeL1Origin)
 
@@ -184,6 +188,7 @@ func ChannelManager_Clear(t *testing.T, batchType uint) {
 	require.Nil(m.currentChannel)
 	require.Empty(m.channelQueue)
 	require.Empty(m.txChannels)
+	require.Zero(m.metr.PendingDABytes())
 }
 
 func ChannelManager_TxResend(t *testing.T, batchType uint) {
@@ -199,7 +204,7 @@ func ChannelManager_TxResend(t *testing.T, batchType uint) {
 
 	require.NoError(m.AddL2Block(a))
 
-	txdata0, err := m.TxData(eth.BlockID{})
+	txdata0, err := m.TxData(eth.BlockID{}, false)
 	require.NoError(err)
 	txdata0bytes := txdata0.CallData()
 	data0 := make([]byte, len(txdata0bytes))
@@ -207,13 +212,13 @@ func ChannelManager_TxResend(t *testing.T, batchType uint) {
 	copy(data0, txdata0bytes)
 
 	// ensure channel is drained
-	_, err = m.TxData(eth.BlockID{})
+	_, err = m.TxData(eth.BlockID{}, false)
 	require.ErrorIs(err, io.EOF)
 
 	// requeue frame
 	m.TxFailed(txdata0.ID())
 
-	txdata1, err := m.TxData(eth.BlockID{})
+	txdata1, err := m.TxData(eth.BlockID{}, false)
 	require.NoError(err)
 
 	data1 := txdata1.CallData()
@@ -276,7 +281,7 @@ type FakeDynamicEthChannelConfig struct {
 	assessments int
 }
 
-func (f *FakeDynamicEthChannelConfig) ChannelConfig() ChannelConfig {
+func (f *FakeDynamicEthChannelConfig) ChannelConfig(isPectra bool) ChannelConfig {
 	f.assessments++
 	if f.chooseBlobs {
 		return f.blobConfig
@@ -356,7 +361,7 @@ func TestChannelManager_TxData(t *testing.T) {
 			m.blocks = []*types.Block{blockA}
 
 			// Call TxData a first time to trigger blocks->channels pipeline
-			_, err := m.TxData(eth.BlockID{})
+			_, err := m.TxData(eth.BlockID{}, false)
 			require.ErrorIs(t, err, io.EOF)
 
 			// The test requires us to have something in the channel queue
@@ -375,7 +380,7 @@ func TestChannelManager_TxData(t *testing.T) {
 			var data txData
 			for {
 				m.blocks = append(m.blocks, blockA)
-				data, err = m.TxData(eth.BlockID{})
+				data, err = m.TxData(eth.BlockID{}, false)
 				if err == nil && data.Len() > 0 {
 					break
 				}
@@ -397,7 +402,7 @@ func TestChannelManager_TxData(t *testing.T) {
 // and then calls handleChannelInvalidated. It asserts on the final state of
 // the channel manager.
 func TestChannelManager_handleChannelInvalidated(t *testing.T) {
-	l := testlog.Logger(t, log.LevelCrit)
+	l := testlog.Logger(t, log.LevelDebug)
 	cfg := channelManagerTestConfig(100, derive.SingularBatchType)
 	metrics := new(metrics.TestMetrics)
 	m := NewChannelManager(l, metrics, cfg, defaultTestRollupConfig)
@@ -412,14 +417,16 @@ func TestChannelManager_handleChannelInvalidated(t *testing.T) {
 	stateSnapshot := queue.Queue[*types.Block]{blockA, blockB}
 	m.blocks = stateSnapshot
 	require.Empty(t, m.channelQueue)
+	require.Equal(t, metrics.ChannelQueueLength, 0)
 
 	// Place an old channel in the queue.
 	// This channel should not be affected by
 	// a requeue or a later channel timing out.
-	oldChannel := newChannel(l, nil, m.defaultCfg, defaultTestRollupConfig, 0, nil)
+	require.NoError(t, m.ensureChannelWithSpace(eth.BlockID{}))
+	oldChannel := m.currentChannel
 	oldChannel.Close()
-	m.channelQueue = []*channel{oldChannel}
 	require.Len(t, m.channelQueue, 1)
+	require.Equal(t, metrics.ChannelQueueLength, 1)
 
 	// Setup initial metrics
 	metrics.RecordL2BlockInPendingQueue(blockA)
@@ -429,6 +436,7 @@ func TestChannelManager_handleChannelInvalidated(t *testing.T) {
 	// Trigger the blocks -> channelQueue data pipelining
 	require.NoError(t, m.ensureChannelWithSpace(eth.BlockID{}))
 	require.Len(t, m.channelQueue, 2)
+	require.Equal(t, metrics.ChannelQueueLength, 2)
 	require.NoError(t, m.processBlocks())
 
 	// Assert that at least one block was processed into the channel
@@ -440,17 +448,29 @@ func TestChannelManager_handleChannelInvalidated(t *testing.T) {
 
 	l1OriginBefore := m.l1OriginLastSubmittedChannel
 
-	m.handleChannelInvalidated(m.currentChannel)
+	// Add another newer channel, this will be wiped when we invalidate
+	channelToInvalidate := m.currentChannel
+	m.currentChannel.Close()
+	require.NoError(t, m.ensureChannelWithSpace(eth.BlockID{}))
+	require.Len(t, m.channelQueue, 3)
+	require.Equal(t, metrics.ChannelQueueLength, 3)
+	require.NoError(t, m.processBlocks())
+	require.Equal(t, 2, m.blockCursor)
+
+	m.handleChannelInvalidated(channelToInvalidate)
 
 	// Ensure we got back to the state above
 	require.Equal(t, m.blocks, stateSnapshot)
 	require.Contains(t, m.channelQueue, oldChannel)
+	require.NotContains(t, m.channelQueue, channelToInvalidate)
+	require.NotContains(t, m.channelQueue, newChannel)
 	require.Len(t, m.channelQueue, 1)
+	require.Equal(t, metrics.ChannelQueueLength, 1)
 
 	// Check metric came back up to previous value
 	require.Equal(t, pendingBytesBefore, metrics.PendingBlocksBytesCurrent)
 
-	// Ensure the l1OridingLastSubmittedChannel was
+	// Ensure the l1OriginLastSubmittedChannel was
 	// not changed. This ensures the next channel
 	// has its duration timeout deadline computed
 	// properly.
@@ -463,148 +483,171 @@ func TestChannelManager_handleChannelInvalidated(t *testing.T) {
 }
 
 func TestChannelManager_PruneBlocks(t *testing.T) {
-	l := testlog.Logger(t, log.LevelDebug)
 	cfg := channelManagerTestConfig(100, derive.SingularBatchType)
-	m := NewChannelManager(l, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
-
+	cfg.InitNoneCompressor()
 	a := types.NewBlock(&types.Header{
 		Number: big.NewInt(0),
-	}, nil, nil, nil)
-	b := types.NewBlock(&types.Header{ // This will shortly become the safe head
+	}, nil, nil, nil, types.DefaultBlockConfig)
+	b := types.NewBlock(&types.Header{
 		Number:     big.NewInt(1),
 		ParentHash: a.Hash(),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 	c := types.NewBlock(&types.Header{
 		Number:     big.NewInt(2),
 		ParentHash: b.Hash(),
-	}, nil, nil, nil)
+	}, nil, nil, nil, types.DefaultBlockConfig)
 
-	require.NoError(t, m.AddL2Block(a))
-	m.blockCursor += 1
-	require.NoError(t, m.AddL2Block(b))
-	m.blockCursor += 1
-	require.NoError(t, m.AddL2Block(c))
-	m.blockCursor += 1
+	type testCase struct {
+		name                string
+		initialQ            queue.Queue[*types.Block]
+		initialBlockCursor  int
+		numChannelsToPrune  int
+		expectedQ           queue.Queue[*types.Block]
+		expectedBlockCursor int
+	}
 
-	// Normal path
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   b.Hash(),
-		Number: b.NumberU64(),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{c}, m.blocks)
-
-	// Safe chain didn't move, nothing to prune
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   b.Hash(),
-		Number: b.NumberU64(),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{c}, m.blocks)
-
-	// Safe chain moved beyond the blocks we had
-	// state should be cleared
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   c.Hash(),
-		Number: uint64(99),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{}, m.blocks)
-
-	// No blocks to prune, NOOP
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   c.Hash(),
-		Number: c.NumberU64(),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{}, m.blocks)
-
-	// Put another block in
-	d := types.NewBlock(&types.Header{
-		Number:     big.NewInt(3),
-		ParentHash: c.Hash(),
-	}, nil, nil, nil)
-	require.NoError(t, m.AddL2Block(d))
-	m.blockCursor += 1
-
-	// Safe chain reorg
-	// state should be cleared
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   a.Hash(),
-		Number: uint64(3),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{}, m.blocks)
-
-	// Put another block in
-	require.NoError(t, m.AddL2Block(d))
-	m.blockCursor += 1
-
-	// Safe chain reversed
-	// state should be cleared
-	m.pruneSafeBlocks(eth.L2BlockRef{
-		Hash:   a.Hash(), // unused
-		Number: uint64(1),
-	})
-	require.Equal(t, queue.Queue[*types.Block]{}, m.blocks)
+	for _, tc := range []testCase{
+		{
+			name:                "[A,B,C]*+1->[B,C]*", // * denotes the cursor
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  3,
+			numChannelsToPrune:  1,
+			expectedQ:           queue.Queue[*types.Block]{b, c},
+			expectedBlockCursor: 2,
+		},
+		{
+			name:                "[A,B,C*]+1->[B,C*]",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  2,
+			numChannelsToPrune:  1,
+			expectedQ:           queue.Queue[*types.Block]{b, c},
+			expectedBlockCursor: 1,
+		},
+		{
+			name:                "[A,B,C]*+2->[C]*",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  3,
+			numChannelsToPrune:  2,
+			expectedQ:           queue.Queue[*types.Block]{c},
+			expectedBlockCursor: 1,
+		},
+		{
+			name:                "[A,B,C*]+2->[C*]",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  2,
+			numChannelsToPrune:  2,
+			expectedQ:           queue.Queue[*types.Block]{c},
+			expectedBlockCursor: 0,
+		},
+		{
+			name:                "[A*,B,C]+1->[B*,C]",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  0,
+			numChannelsToPrune:  1,
+			expectedQ:           queue.Queue[*types.Block]{b, c},
+			expectedBlockCursor: 0,
+		},
+		{
+			name:                "[A,B,C]+3->[]",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  3,
+			numChannelsToPrune:  3,
+			expectedQ:           queue.Queue[*types.Block]{},
+			expectedBlockCursor: 0,
+		},
+		{
+			name:                "[A,B,C]*+4->panic",
+			initialQ:            queue.Queue[*types.Block]{a, b, c},
+			initialBlockCursor:  3,
+			numChannelsToPrune:  4,
+			expectedQ:           nil, // declare that the prune method should panic
+			expectedBlockCursor: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := testlog.Logger(t, log.LevelCrit)
+			m := NewChannelManager(l, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
+			m.blocks = tc.initialQ
+			m.blockCursor = tc.initialBlockCursor
+			if tc.expectedQ != nil {
+				m.PruneSafeBlocks(tc.numChannelsToPrune)
+				require.Equal(t, tc.expectedQ, m.blocks)
+			} else {
+				require.Panics(t, func() { m.PruneSafeBlocks(tc.numChannelsToPrune) })
+			}
+		})
+	}
 
 }
 
 func TestChannelManager_PruneChannels(t *testing.T) {
-	l := testlog.Logger(t, log.LevelCrit)
 	cfg := channelManagerTestConfig(100, derive.SingularBatchType)
-	cfg.InitNoneCompressor()
-	m := NewChannelManager(l, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
-
-	A, err := newChannelWithChannelOut(l, metrics.NoopMetrics, cfg, m.rollupCfg, 0)
+	A, err := newChannelWithChannelOut(nil, metrics.NoopMetrics, cfg, defaultTestRollupConfig, 0)
 	require.NoError(t, err)
-	B, err := newChannelWithChannelOut(l, metrics.NoopMetrics, cfg, m.rollupCfg, 0)
+	B, err := newChannelWithChannelOut(nil, metrics.NoopMetrics, cfg, defaultTestRollupConfig, 0)
 	require.NoError(t, err)
-	C, err := newChannelWithChannelOut(l, metrics.NoopMetrics, cfg, m.rollupCfg, 0)
+	C, err := newChannelWithChannelOut(nil, metrics.NoopMetrics, cfg, defaultTestRollupConfig, 0)
 	require.NoError(t, err)
 
-	m.channelQueue = []*channel{A, B, C}
+	type testCase struct {
+		name                   string
+		initialQ               []*channel
+		initialCurrentChannel  *channel
+		numChannelsToPrune     int
+		expectedQ              []*channel
+		expectedCurrentChannel *channel
+	}
 
-	numTx := 1
-	rng := rand.New(rand.NewSource(123))
-	a0 := derivetest.RandomL2BlockWithChainId(rng, numTx, defaultTestRollupConfig.L2ChainID)
-	a0 = a0.WithSeal(&types.Header{Number: big.NewInt(0)})
-	a1 := derivetest.RandomL2BlockWithChainId(rng, numTx, defaultTestRollupConfig.L2ChainID)
-	a1 = a1.WithSeal(&types.Header{Number: big.NewInt(1)})
-	b2 := derivetest.RandomL2BlockWithChainId(rng, numTx, defaultTestRollupConfig.L2ChainID)
-	b2 = b2.WithSeal(&types.Header{Number: big.NewInt(2)})
-	b3 := derivetest.RandomL2BlockWithChainId(rng, numTx, defaultTestRollupConfig.L2ChainID)
-	b3 = b3.WithSeal(&types.Header{Number: big.NewInt(3)})
-	c4 := derivetest.RandomL2BlockWithChainId(rng, numTx, defaultTestRollupConfig.L2ChainID)
-	c4 = c4.WithSeal(&types.Header{Number: big.NewInt(4)})
-
-	_, err = A.AddBlock(a0)
-	require.NoError(t, err)
-	_, err = A.AddBlock(a1)
-	require.NoError(t, err)
-
-	_, err = B.AddBlock(b2)
-	require.NoError(t, err)
-	_, err = B.AddBlock(b3)
-	require.NoError(t, err)
-
-	_, err = C.AddBlock(c4)
-	require.NoError(t, err)
-
-	m.pruneChannels(eth.L2BlockRef{
-		Number: uint64(3),
-	})
-
-	require.Equal(t, []*channel{C}, m.channelQueue)
-
-	m.pruneChannels(eth.L2BlockRef{
-		Number: uint64(4),
-	})
-
-	require.Equal(t, []*channel{}, m.channelQueue)
-
-	m.pruneChannels(eth.L2BlockRef{
-		Number: uint64(4),
-	})
-
-	require.Equal(t, []*channel{}, m.channelQueue)
-
+	for _, tc := range []testCase{
+		{
+			name:               "[A,B,C]+1->[B,C]",
+			initialQ:           []*channel{A, B, C},
+			numChannelsToPrune: 1,
+			expectedQ:          []*channel{B, C},
+		},
+		{
+			name:                   "[A,B,C]+3->[] + currentChannel=C",
+			initialQ:               []*channel{A, B, C},
+			initialCurrentChannel:  C,
+			numChannelsToPrune:     3,
+			expectedQ:              []*channel{},
+			expectedCurrentChannel: nil,
+		},
+		{
+			name:               "[A,B,C]+2->[C]",
+			initialQ:           []*channel{A, B, C},
+			numChannelsToPrune: 2,
+			expectedQ:          []*channel{C},
+		},
+		{
+			name:               "[A,B,C]+3->[]",
+			initialQ:           []*channel{A, B, C},
+			numChannelsToPrune: 3,
+			expectedQ:          []*channel{},
+		},
+		{
+			name:               "[A,B,C]+4->panic",
+			initialQ:           []*channel{A, B, C},
+			numChannelsToPrune: 4,
+			expectedQ:          nil, // declare that the prune method should panic
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := testlog.Logger(t, log.LevelCrit)
+			m := NewChannelManager(l, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
+			m.channelQueue = tc.initialQ
+			m.currentChannel = tc.initialCurrentChannel
+			if tc.expectedQ != nil {
+				m.PruneChannels(tc.numChannelsToPrune)
+				require.Equal(t, tc.expectedQ, m.channelQueue)
+				require.Equal(t, tc.expectedCurrentChannel, m.currentChannel)
+			} else {
+				require.Panics(t, func() { m.PruneChannels(tc.numChannelsToPrune) })
+			}
+		})
+	}
 }
+
 func TestChannelManager_ChannelOutFactory(t *testing.T) {
 	type ChannelOutWrapper struct {
 		derive.ChannelOut
@@ -626,58 +669,4 @@ func TestChannelManager_ChannelOutFactory(t *testing.T) {
 	require.NoError(t, m.ensureChannelWithSpace(eth.BlockID{}))
 
 	require.IsType(t, &ChannelOutWrapper{}, m.currentChannel.channelBuilder.co)
-}
-
-func TestChannelManager_CheckExpectedProgress(t *testing.T) {
-	l := testlog.Logger(t, log.LevelCrit)
-	cfg := channelManagerTestConfig(100, derive.SingularBatchType)
-	cfg.InitNoneCompressor()
-	m := NewChannelManager(l, metrics.NoopMetrics, cfg, defaultTestRollupConfig)
-
-	channelMaxInclusionBlockNumber := uint64(3)
-	channelLatestSafeBlockNumber := uint64(11)
-
-	// Prepare a (dummy) fully submitted channel
-	// with
-	// maxInclusionBlock and latest safe block number as above
-	A, err := newChannelWithChannelOut(l, metrics.NoopMetrics, cfg, m.rollupCfg, 0)
-	require.NoError(t, err)
-	rng := rand.New(rand.NewSource(123))
-	a0 := derivetest.RandomL2BlockWithChainId(rng, 1, defaultTestRollupConfig.L2ChainID)
-	a0 = a0.WithSeal(&types.Header{Number: big.NewInt(int64(channelLatestSafeBlockNumber))})
-	_, err = A.AddBlock(a0)
-	require.NoError(t, err)
-	A.maxInclusionBlock = channelMaxInclusionBlockNumber
-	A.Close()
-	A.channelBuilder.frames = nil
-	A.channelBuilder.frameCursor = 0
-	require.True(t, A.isFullySubmitted())
-
-	m.channelQueue = append(m.channelQueue, A)
-
-	// The current L1 number implies that
-	// channel A above should have been derived
-	// from, so we expect safe head to progress to
-	// the channelLatestSafeBlockNumber.
-	// Since the safe head moved to 11, there is no error:
-	ss := eth.SyncStatus{
-		CurrentL1: eth.L1BlockRef{Number: channelMaxInclusionBlockNumber + 1},
-		SafeL2:    eth.L2BlockRef{Number: channelLatestSafeBlockNumber},
-	}
-	err = m.CheckExpectedProgress(ss)
-	require.NoError(t, err)
-
-	// If the currentL1 is as above but the
-	// safe head is less than channelLatestSafeBlockNumber,
-	// the method should return an error:
-	ss.SafeL2 = eth.L2BlockRef{Number: channelLatestSafeBlockNumber - 1}
-	err = m.CheckExpectedProgress(ss)
-	require.Error(t, err)
-
-	// If the safe head is still less than channelLatestSafeBlockNumber
-	// but the currentL1 is _equal_ to the channelMaxInclusionBlockNumber
-	// there should be no error as that block is still being derived from:
-	ss.CurrentL1 = eth.L1BlockRef{Number: channelMaxInclusionBlockNumber}
-	err = m.CheckExpectedProgress(ss)
-	require.NoError(t, err)
 }

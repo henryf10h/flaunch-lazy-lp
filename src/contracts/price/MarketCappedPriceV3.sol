@@ -27,6 +27,8 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     error InvalidTokenPair();
     error MarketCapTooSmall(uint _usdcMarketCap, uint _usdcMarketCapMinimum);
 
+    event FlaunchFeeThresholdUpdated(uint _flaunchFeeThreshold);
+
     /**
      * The struct of data that should be passed from the flaunching flow to define the
      * desired market cap when a token is flaunching.
@@ -38,7 +40,7 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     }
 
     /// Sets a minimum market cap threshold
-    uint public constant MINIMUM_USDC_MARKET_CAP = 1000e6;
+    uint public constant MINIMUM_USDC_MARKET_CAP = 1e6;
 
     /// The token addresses for ETH and USDC
     address public immutable ethToken;
@@ -47,6 +49,9 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     /// The Uniswap V3 Pool that holds our ETH : USDC position
     IUniswapV3Pool public pool;
     bool public usdcToken0;
+
+    /// The minimum flaunch price that would incur a flaunching fee
+    uint public flaunchFeeThreshold;
 
     /// The {FlaunchFeeExemption} contract
     FlaunchFeeExemption public immutable flaunchFeeExemption;
@@ -74,12 +79,20 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
     /**
      * Sets a Flaunching fee of 0.1% of the desired market cap.
      *
-     * @param _sender The address flaunching, which may be exluded from flaunching fees
+     * @param _sender The address flaunching, which may be excluded from flaunching fees
      * @param _initialPriceParams Parameters for the initial pricing
      *
      * @return uint The fee taken from the user for Flaunching a token
      */
     function getFlaunchingFee(address _sender, bytes calldata _initialPriceParams) public view returns (uint) {
+        // Decode our initial price parameters to give the USDC value requested
+        (MarketCappedPriceParams memory params) = abi.decode(_initialPriceParams, (MarketCappedPriceParams));
+
+        // If the fee is below our set threshold, then we want to exclude the fee
+        if (params.usdcMarketCap <= flaunchFeeThreshold) {
+            return 0;
+        }
+
         // Check if our `_sender` is fee excluded
         if (flaunchFeeExemption.feeExcluded(_sender)) {
             return 0;
@@ -157,6 +170,16 @@ contract MarketCappedPriceV3 is IInitialPrice, Ownable {
             : FullMath.mulDiv(1e18, priceX96, 1 << 96);
 
         return FullMath.mulDiv(params.usdcMarketCap, 1e18, ethUSDCPrice);
+    }
+
+    /**
+     * Allows the `flaunchFeeThreshold` to be updated.
+     *
+     * @param _flaunchFeeThreshold The new flaunch fee threshold
+     */
+    function setFlaunchFeeThreshold(uint _flaunchFeeThreshold) public onlyOwner {
+        flaunchFeeThreshold = _flaunchFeeThreshold;
+        emit FlaunchFeeThresholdUpdated(_flaunchFeeThreshold);
     }
 
     /**

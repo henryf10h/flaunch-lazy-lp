@@ -387,6 +387,25 @@
     },
     {
       "type": "function",
+      "name": "poolId",
+      "inputs": [
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "PoolId"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "positionManager",
       "inputs": [],
       "outputs": [
@@ -489,6 +508,19 @@
           "name": "_baseURI",
           "type": "string",
           "internalType": "string"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "setMemecoinTreasuryImplementation",
+      "inputs": [
+        {
+          "name": "_memecoinTreasuryImplementation",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "outputs": [],
@@ -652,6 +684,19 @@
     },
     {
       "type": "event",
+      "name": "BaseURIUpdated",
+      "inputs": [
+        {
+          "name": "_newBaseURI",
+          "type": "string",
+          "indexed": false,
+          "internalType": "string"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "Initialized",
       "inputs": [
         {
@@ -659,6 +704,19 @@
           "type": "uint64",
           "indexed": false,
           "internalType": "uint64"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "MemecoinTreasuryImplementationUpdated",
+      "inputs": [
+        {
+          "name": "_newImplementation",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
         }
       ],
       "anonymous": false
@@ -746,6 +804,11 @@
     {
       "type": "error",
       "name": "BalanceQueryForZeroAddress",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "BaseURICannotBeEmpty",
       "inputs": []
     },
     {

@@ -150,4 +150,27 @@ contract InitialPriceTest is FlaunchTest {
         assertEq(initialPrice.getFlaunchingFee(_excluded, abi.encode('')), fee);
     }
 
+    function test_CanSetFlaunchFeeThreshold(uint _newFlaunchFeeThreshold) public {
+        vm.startPrank(owner);
+
+        vm.expectEmit();
+        emit InitialPrice.FlaunchFeeThresholdUpdated(_newFlaunchFeeThreshold);
+        initialPrice.setFlaunchFeeThreshold(_newFlaunchFeeThreshold);
+
+        vm.stopPrank();
+
+        assertEq(initialPrice.flaunchFeeThreshold(), _newFlaunchFeeThreshold);
+    }
+
+    function test_CannotSetFlaunchFeeThresholdIfNotOwner(address _caller, uint _newFlaunchFeeThreshold) public {
+        vm.assume(_caller != owner);
+
+        vm.startPrank(_caller);
+
+        vm.expectRevert(UNAUTHORIZED);
+        initialPrice.setFlaunchFeeThreshold(_newFlaunchFeeThreshold);
+
+        vm.stopPrank();
+    }
+
 }

@@ -6,11 +6,12 @@ import { Test } from "forge-std/Test.sol";
 import { CommonTest } from "test/setup/CommonTest.sol";
 
 // Libraries
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Predeploys } from "src/libraries/Predeploys.sol";
 import { Hashing } from "src/libraries/Hashing.sol";
 import { Encoding } from "src/libraries/Encoding.sol";
 
-import { IL1CrossDomainMessenger } from "src/L1/interfaces/IL1CrossDomainMessenger.sol";
+import { IL1CrossDomainMessenger } from "interfaces/L1/IL1CrossDomainMessenger.sol";
 
 // CrossDomainMessenger_Test is for testing functionality which is common to both the L1 and L2
 // CrossDomainMessenger contracts. For simplicity, we use the L1 Messenger as the test contract.
@@ -30,11 +31,108 @@ contract CrossDomainMessenger_BaseGas_Test is CommonTest {
     ///         or equal to the minimum gas limit value on the OptimismPortal.
     ///         This guarantees that the messengers will always pass sufficient
     ///         gas to the OptimismPortal.
-    function testFuzz_baseGas_portalMinGasLimit_succeeds(bytes memory _data, uint32 _minGasLimit) external view {
-        vm.assume(_data.length <= type(uint64).max);
+    function testFuzz_baseGas_portalMinGasLimit_succeeds(bytes calldata _data, uint32 _minGasLimit) external view {
+        if (_data.length > type(uint64).max) {
+            _data = _data[0:type(uint64).max];
+        }
+
         uint64 baseGas = l1CrossDomainMessenger.baseGas(_data, _minGasLimit);
-        uint64 minGasLimit = optimismPortal.minimumGasLimit(uint64(_data.length));
+        uint64 minGasLimit = optimismPortal2.minimumGasLimit(uint64(_data.length));
         assertTrue(baseGas >= minGasLimit);
+    }
+
+    /// @notice Test that baseGas returns at least the floor cost for calldata
+    function test_baseGas_floor_succeeds() external view {
+        // Create a message large enough that the floor cost would be higher than the execution gas
+        bytes memory largeMessage = new bytes(100_000);
+
+        uint64 baseGasResult = l1CrossDomainMessenger.baseGas(largeMessage, 0);
+
+        // Calculate the expected floor cost
+        uint64 expectedFloorCost = l1CrossDomainMessenger.TX_BASE_GAS()
+            + (
+                uint64(largeMessage.length + l1CrossDomainMessenger.ENCODING_OVERHEAD())
+                    * l1CrossDomainMessenger.FLOOR_CALLDATA_OVERHEAD()
+            );
+
+        // Verify that the result is at least the floor cost
+        assertTrue(baseGasResult >= expectedFloorCost, "baseGas should return at least the floor cost");
+    }
+
+    /// @notice Test that baseGas returns the execution gas when it's higher than the floor cost
+    function test_baseGas_executionGas_succeeds() external view {
+        // Create a small message where execution gas would be higher than floor cost
+        bytes memory smallMessage = new bytes(10);
+        uint32 highGasLimit = 1_000_000;
+
+        uint64 baseGasResult = l1CrossDomainMessenger.baseGas(smallMessage, highGasLimit);
+
+        // Calculate the expected floor cost
+        uint64 floorCost = l1CrossDomainMessenger.TX_BASE_GAS()
+            + (
+                uint64(smallMessage.length + l1CrossDomainMessenger.ENCODING_OVERHEAD())
+                    * l1CrossDomainMessenger.FLOOR_CALLDATA_OVERHEAD()
+            );
+
+        // Calculate the expected execution gas (simplified version of what's in the contract)
+        uint64 executionGas = l1CrossDomainMessenger.RELAY_CONSTANT_OVERHEAD()
+            + l1CrossDomainMessenger.RELAY_CALL_OVERHEAD() + l1CrossDomainMessenger.RELAY_RESERVED_GAS()
+            + l1CrossDomainMessenger.RELAY_GAS_CHECK_BUFFER()
+            + (
+                (highGasLimit * l1CrossDomainMessenger.MIN_GAS_DYNAMIC_OVERHEAD_NUMERATOR())
+                    / l1CrossDomainMessenger.MIN_GAS_DYNAMIC_OVERHEAD_DENOMINATOR()
+            );
+
+        uint64 expectedExecutionGasWithOverhead = l1CrossDomainMessenger.TX_BASE_GAS() + executionGas
+            + (
+                uint64(smallMessage.length + l1CrossDomainMessenger.ENCODING_OVERHEAD())
+                    * l1CrossDomainMessenger.MIN_GAS_CALLDATA_OVERHEAD()
+            );
+
+        // Verify that the result is the execution gas (which should be higher than floor cost)
+        assertTrue(
+            baseGasResult >= expectedExecutionGasWithOverhead, "baseGas should return at least the execution gas"
+        );
+        assertTrue(
+            expectedExecutionGasWithOverhead > floorCost, "Execution gas should be higher than floor cost for this test"
+        );
+    }
+
+    /// @notice Fuzz test to verify the baseGas function correctly implements the Math.max logic
+    /// @param _message The message to test
+    /// @param _minGasLimit The minimum gas limit to test
+    function testFuzz_baseGas_maxLogic_succeeds(bytes calldata _message, uint32 _minGasLimit) external view {
+        uint64 baseGasResult = l1CrossDomainMessenger.baseGas(_message, _minGasLimit);
+
+        // Calculate the expected execution gas
+        uint64 executionGas = l1CrossDomainMessenger.RELAY_CONSTANT_OVERHEAD()
+            + l1CrossDomainMessenger.RELAY_CALL_OVERHEAD() + l1CrossDomainMessenger.RELAY_RESERVED_GAS()
+            + l1CrossDomainMessenger.RELAY_GAS_CHECK_BUFFER()
+            + (
+                (_minGasLimit * l1CrossDomainMessenger.MIN_GAS_DYNAMIC_OVERHEAD_NUMERATOR())
+                    / l1CrossDomainMessenger.MIN_GAS_DYNAMIC_OVERHEAD_DENOMINATOR()
+            );
+
+        uint64 executionGasWithOverhead = executionGas
+            + (
+                uint64(_message.length + l1CrossDomainMessenger.ENCODING_OVERHEAD())
+                    * l1CrossDomainMessenger.MIN_GAS_CALLDATA_OVERHEAD()
+            );
+
+        // The result should be at least the maximum of the two calculations
+        uint64 expectedMinimum = uint64(
+            Math.max(
+                executionGasWithOverhead,
+                uint64(_message.length + l1CrossDomainMessenger.ENCODING_OVERHEAD())
+                    * l1CrossDomainMessenger.FLOOR_CALLDATA_OVERHEAD()
+            )
+        );
+        expectedMinimum += l1CrossDomainMessenger.TX_BASE_GAS();
+
+        assertTrue(
+            baseGasResult >= expectedMinimum,
+            "baseGas should return at least the maximum of execution gas and floor cost"
+        );
     }
 }
 
@@ -118,7 +216,7 @@ contract CrossDomainMessenger_RelayMessage_Test is CommonTest {
 
     function setUp() public override {
         super.setUp();
-        er = new ExternalRelay(l1CrossDomainMessenger, address(optimismPortal));
+        er = new ExternalRelay(l1CrossDomainMessenger, address(optimismPortal2));
     }
 
     /// @dev This test mocks an OptimismPortal call to the L1CrossDomainMessenger via
@@ -150,8 +248,8 @@ contract CrossDomainMessenger_RelayMessage_Test is CommonTest {
         });
 
         // set the value of op.l2Sender() to be the L2 Cross Domain Messenger.
-        vm.store(address(optimismPortal), bytes32(senderSlotIndex), bytes32(abi.encode(sender)));
-        vm.prank(address(optimismPortal));
+        vm.store(address(optimismPortal2), bytes32(senderSlotIndex), bytes32(abi.encode(sender)));
+        vm.prank(address(optimismPortal2));
         l1CrossDomainMessenger.relayMessage({
             _nonce: Encoding.encodeVersionedNonce({ _nonce: 0, _version: 1 }),
             _sender: sender,

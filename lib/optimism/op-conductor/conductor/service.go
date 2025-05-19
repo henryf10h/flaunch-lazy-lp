@@ -172,19 +172,26 @@ func (c *OpConductor) initConsensus(ctx context.Context) error {
 	raftConsensusConfig := &consensus.RaftConsensusConfig{
 		ServerID: c.cfg.RaftServerID,
 		// AdvertisedAddr may be empty: the server will then default to what it binds to.
-		AdvertisedAddr:    raft.ServerAddress(c.cfg.ConsensusAdvertisedAddr),
-		ListenAddr:        c.cfg.ConsensusAddr,
-		ListenPort:        c.cfg.ConsensusPort,
-		StorageDir:        c.cfg.RaftStorageDir,
-		Bootstrap:         c.cfg.RaftBootstrap,
-		RollupCfg:         &c.cfg.RollupCfg,
-		SnapshotInterval:  c.cfg.RaftSnapshotInterval,
-		SnapshotThreshold: c.cfg.RaftSnapshotThreshold,
-		TrailingLogs:      c.cfg.RaftTrailingLogs,
+		AdvertisedAddr:     raft.ServerAddress(c.cfg.ConsensusAdvertisedAddr),
+		ListenAddr:         c.cfg.ConsensusAddr,
+		ListenPort:         c.cfg.ConsensusPort,
+		StorageDir:         c.cfg.RaftStorageDir,
+		Bootstrap:          c.cfg.RaftBootstrap,
+		RollupCfg:          &c.cfg.RollupCfg,
+		SnapshotInterval:   c.cfg.RaftSnapshotInterval,
+		SnapshotThreshold:  c.cfg.RaftSnapshotThreshold,
+		TrailingLogs:       c.cfg.RaftTrailingLogs,
+		HeartbeatTimeout:   c.cfg.RaftHeartbeatTimeout,
+		LeaderLeaseTimeout: c.cfg.RaftLeaderLeaseTimeout,
 	}
 	cons, err := consensus.NewRaftConsensus(c.log, raftConsensusConfig)
 	if err != nil {
-		return errors.Wrap(err, "failed to create raft consensus")
+		if !errors.Is(err, raft.ErrCantBootstrap) {
+			return errors.Wrap(err, "failed to create raft consensus")
+		}
+	} else if c.cfg.RaftBootstrap {
+		c.log.Warn("Raft cluster bootstrapped, pausing conductor.")
+		c.paused.Store(true)
 	}
 	c.cons = cons
 	c.leaderUpdateCh = c.cons.LeaderCh()
@@ -231,6 +238,7 @@ func (oc *OpConductor) initRPCServer(ctx context.Context) error {
 		oc.cfg.RPC.ListenPort,
 		oc.version,
 		oprpc.WithLogger(oc.log),
+		oprpc.WithRPCRecorder(oc.metrics.NewRecorder("main")),
 	)
 	api := conductorrpc.NewAPIBackend(oc.log, oc)
 	server.AddAPI(rpc.API{

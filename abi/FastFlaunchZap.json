@@ -13,6 +13,19 @@
     },
     {
       "type": "function",
+      "name": "CREATOR_FEE_ALLOCATION",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint24",
+          "internalType": "uint24"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "FAIR_LAUNCH_SUPPLY",
       "inputs": [],
       "outputs": [

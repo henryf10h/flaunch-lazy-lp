@@ -17,16 +17,61 @@
     },
     {
       "type": "function",
+      "name": "balances",
+      "inputs": [
+        {
+          "name": "_recipient",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "balance_",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "claim",
       "inputs": [],
       "outputs": [
         {
-          "name": "creatorAmount_",
+          "name": "amount_",
           "type": "uint256",
           "internalType": "uint256"
-        },
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "claim",
+      "inputs": [
         {
-          "name": "protocolAmount_",
+          "name": "_flaunchToken",
+          "type": "tuple[]",
+          "internalType": "struct ITreasuryManager.FlaunchToken[]",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "amount_",
           "type": "uint256",
           "internalType": "uint256"
         }
@@ -36,41 +81,40 @@
     {
       "type": "function",
       "name": "creator",
-      "inputs": [],
-      "outputs": [
+      "inputs": [
         {
-          "name": "",
+          "name": "_flaunch",
           "type": "address",
-          "internalType": "address payable"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
-      "name": "creatorTotalClaim",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
-      "name": "flaunchToken",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "flaunch",
-          "type": "address",
-          "internalType": "contract Flaunch"
+          "internalType": "address"
         },
         {
-          "name": "tokenId",
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_creator",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "creatorTotalClaimed",
+      "inputs": [
+        {
+          "name": "_creator",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_claimed",
           "type": "uint256",
           "internalType": "uint256"
         }
@@ -79,7 +123,7 @@
     },
     {
       "type": "function",
-      "name": "initialize",
+      "name": "deposit",
       "inputs": [
         {
           "name": "_flaunchToken",
@@ -99,6 +143,98 @@
           ]
         },
         {
+          "name": "_creator",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_data",
+          "type": "bytes",
+          "internalType": "bytes"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "flaunchTokenInternalIds",
+      "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_internalId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getPoolId",
+      "inputs": [
+        {
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "poolId_",
+          "type": "bytes32",
+          "internalType": "PoolId"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getProtocolFee",
+      "inputs": [
+        {
+          "name": "_amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "protocolFee_",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "initialize",
+      "inputs": [
+        {
           "name": "_owner",
           "type": "address",
           "internalType": "address"
@@ -114,6 +250,43 @@
     },
     {
       "type": "function",
+      "name": "initialized",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "internalIds",
+      "inputs": [
+        {
+          "name": "_internalId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "flaunch",
+          "type": "address",
+          "internalType": "contract Flaunch"
+        },
+        {
+          "name": "tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "managerOwner",
       "inputs": [],
       "outputs": [
@@ -121,6 +294,19 @@
           "name": "",
           "type": "address",
           "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "nextInternalId",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
         }
       ],
       "stateMutability": "view"
@@ -153,7 +339,7 @@
     },
     {
       "type": "function",
-      "name": "protocolTotalClaim",
+      "name": "protocolTotalClaimed",
       "inputs": [],
       "outputs": [
         {
@@ -199,22 +385,26 @@
       "name": "setCreator",
       "inputs": [
         {
+          "name": "_flaunchToken",
+          "type": "tuple",
+          "internalType": "struct ITreasuryManager.FlaunchToken",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        },
+        {
           "name": "_creator",
           "type": "address",
           "internalType": "address payable"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "setProtocolFee",
-      "inputs": [
-        {
-          "name": "_protocolFee",
-          "type": "uint256",
-          "internalType": "uint256"
         }
       ],
       "outputs": [],
@@ -232,6 +422,25 @@
       ],
       "outputs": [],
       "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "tokenPoolId",
+      "inputs": [
+        {
+          "name": "_internalId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_poolId",
+          "type": "bytes32",
+          "internalType": "PoolId"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -259,7 +468,62 @@
     },
     {
       "type": "function",
-      "name": "transferOwnership",
+      "name": "tokenTotalClaimed",
+      "inputs": [
+        {
+          "name": "_flaunch",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_claimed",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "tokens",
+      "inputs": [
+        {
+          "name": "_creator",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "flaunchTokens_",
+          "type": "tuple[]",
+          "internalType": "struct ITreasuryManager.FlaunchToken[]",
+          "components": [
+            {
+              "name": "flaunch",
+              "type": "address",
+              "internalType": "contract Flaunch"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "transferManagerOwnership",
       "inputs": [
         {
           "name": "_newManagerOwner",
@@ -288,6 +552,18 @@
       "name": "CreatorUpdated",
       "inputs": [
         {
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
           "name": "_creator",
           "type": "address",
           "indexed": false,
@@ -301,16 +577,10 @@
       "name": "ManagerInitialized",
       "inputs": [
         {
-          "name": "_flaunch",
+          "name": "_owner",
           "type": "address",
-          "indexed": true,
+          "indexed": false,
           "internalType": "address"
-        },
-        {
-          "name": "_tokenId",
-          "type": "uint256",
-          "indexed": true,
-          "internalType": "uint256"
         },
         {
           "name": "_params",
@@ -318,11 +588,6 @@
           "indexed": false,
           "internalType": "struct RevenueManager.InitializeParams",
           "components": [
-            {
-              "name": "creator",
-              "type": "address",
-              "internalType": "address payable"
-            },
             {
               "name": "protocolRecipient",
               "type": "address",
@@ -385,43 +650,50 @@
     },
     {
       "type": "event",
+      "name": "ProtocolRevenueClaimed",
+      "inputs": [
+        {
+          "name": "_recipient",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "_amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "RevenueClaimed",
       "inputs": [
         {
-          "name": "_creator",
+          "name": "_flaunch",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "_recipient",
           "type": "address",
           "indexed": false,
           "internalType": "address"
         },
         {
-          "name": "_creatorAmount",
+          "name": "_amount",
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
-        },
-        {
-          "name": "_creatorSuccess",
-          "type": "bool",
-          "indexed": false,
-          "internalType": "bool"
-        },
-        {
-          "name": "_protocol",
-          "type": "address",
-          "indexed": false,
-          "internalType": "address"
-        },
-        {
-          "name": "_protocolAmount",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "_protocolSuccess",
-          "type": "bool",
-          "indexed": false,
-          "internalType": "bool"
         }
       ],
       "anonymous": false
@@ -515,7 +787,22 @@
     },
     {
       "type": "error",
+      "name": "AlreadyInitialized",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "FailedToClaim",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "FlaunchContractNotValid",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidClaimer",
       "inputs": []
     },
     {
@@ -530,35 +817,12 @@
     },
     {
       "type": "error",
-      "name": "NotManagerOwner",
+      "name": "NotInitialized",
       "inputs": []
     },
     {
       "type": "error",
-      "name": "TokenAlreadySet",
-      "inputs": [
-        {
-          "name": "_flaunchToken",
-          "type": "tuple",
-          "internalType": "struct ITreasuryManager.FlaunchToken",
-          "components": [
-            {
-              "name": "flaunch",
-              "type": "address",
-              "internalType": "contract Flaunch"
-            },
-            {
-              "name": "tokenId",
-              "type": "uint256",
-              "internalType": "uint256"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "type": "error",
-      "name": "TokenNotSet",
+      "name": "NotManagerOwner",
       "inputs": []
     },
     {
@@ -571,6 +835,11 @@
           "internalType": "uint256"
         }
       ]
+    },
+    {
+      "type": "error",
+      "name": "UnknownFlaunchToken",
+      "inputs": []
     }
   ]
 }

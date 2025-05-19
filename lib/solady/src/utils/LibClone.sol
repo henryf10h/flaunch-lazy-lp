@@ -23,13 +23,13 @@ pragma solidity ^0.8.4;
 /// - Automatically verified on Etherscan.
 ///
 /// @dev Clones with immutable args (CWIA):
-/// The implementation of CWIA here is does NOT append the immutable args into the calldata
+/// The implementation of CWIA here does NOT append the immutable args into the calldata
 /// passed into delegatecall. It is simply an ERC1167 minimal proxy with the immutable arguments
 /// appended to the back of the runtime bytecode.
 /// - Uses the identity precompile (0x4) to copy args during deployment.
 ///
 /// @dev Minimal ERC1967 proxy:
-/// An minimal ERC1967 proxy, intended to be upgraded with UUPS.
+/// A minimal ERC1967 proxy, intended to be upgraded with UUPS.
 /// This is NOT the same as ERC1967Factory's transparent proxy, which includes admin logic.
 /// - Automatically verified on Etherscan.
 ///
@@ -38,13 +38,13 @@ pragma solidity ^0.8.4;
 /// - Automatically verified on Etherscan.
 ///
 /// @dev ERC1967I proxy:
-/// An variant of the minimal ERC1967 proxy, with a special code path that activates
+/// A variant of the minimal ERC1967 proxy, with a special code path that activates
 /// if `calldatasize() == 1`. This code path skips the delegatecall and directly returns the
 /// `implementation` address. The returned implementation is guaranteed to be valid if the
 /// keccak256 of the proxy's code is equal to `ERC1967I_CODE_HASH`.
 ///
 /// @dev ERC1967I proxy with immutable args:
-/// An variant of the minimal ERC1967 proxy, with a special code path that activates
+/// A variant of the minimal ERC1967 proxy, with a special code path that activates
 /// if `calldatasize() == 1`. This code path skips the delegatecall and directly returns the
 /// - Uses the identity precompile (0x4) to copy args during deployment.
 ///
@@ -57,13 +57,13 @@ pragma solidity ^0.8.4;
 /// - Automatically verified on Etherscan.
 ///
 /// @dev ERC1967I beacon proxy:
-/// An variant of the minimal ERC1967 beacon proxy, with a special code path that activates
+/// A variant of the minimal ERC1967 beacon proxy, with a special code path that activates
 /// if `calldatasize() == 1`. This code path skips the delegatecall and directly returns the
 /// `implementation` address. The returned implementation is guaranteed to be valid if the
 /// keccak256 of the proxy's code is equal to `ERC1967I_CODE_HASH`.
 ///
 /// @dev ERC1967I proxy with immutable args:
-/// An variant of the minimal ERC1967 beacon proxy, with a special code path that activates
+/// A variant of the minimal ERC1967 beacon proxy, with a special code path that activates
 /// if `calldatasize() == 1`. This code path skips the delegatecall and directly returns the
 /// - Uses the identity precompile (0x4) to copy args during deployment.
 library LibClone {
@@ -588,7 +588,7 @@ library LibClone {
         }
     }
 
-    /// @dev Returns the initialization code hash of the clone of `implementation`
+    /// @dev Returns the initialization code of the clone of `implementation`
     /// using immutable arguments encoded in `args`.
     function initCode(address implementation, bytes memory args)
         internal
@@ -670,7 +670,8 @@ library LibClone {
         assembly {
             args := mload(0x40)
             let n := and(0xffffffffff, sub(extcodesize(instance), 0x2d))
-            extcodecopy(instance, add(args, 0x20), add(start, 0x2d), add(n, 0x20))
+            let l := sub(n, and(0xffffff, mul(lt(start, n), start)))
+            extcodecopy(instance, args, add(start, 0x0d), add(l, 0x40))
             mstore(args, mul(sub(n, start), lt(start, n))) // Store the length.
             mstore(0x40, add(args, add(0x40, mload(args)))) // Allocate memory.
         }
@@ -1144,7 +1145,8 @@ library LibClone {
         assembly {
             args := mload(0x40)
             let n := and(0xffffffffff, sub(extcodesize(instance), 0x3d))
-            extcodecopy(instance, add(args, 0x20), add(start, 0x3d), add(n, 0x20))
+            let l := sub(n, and(0xffffff, mul(lt(start, n), start)))
+            extcodecopy(instance, args, add(start, 0x1d), add(l, 0x40))
             mstore(args, mul(sub(n, start), lt(start, n))) // Store the length.
             mstore(0x40, add(args, add(0x40, mload(args)))) // Allocate memory.
         }
@@ -1467,7 +1469,7 @@ library LibClone {
         instance = deployDeterministicERC1967I(0, implementation, args, salt);
     }
 
-    /// @dev Deploys a deterministic ERC1967I proxy with `implementation`,`args`,  and `salt`.
+    /// @dev Deploys a deterministic ERC1967I proxy with `implementation`, `args`, and `salt`.
     /// Deposits `value` ETH during deployment.
     function deployDeterministicERC1967I(
         uint256 value,
@@ -1506,7 +1508,7 @@ library LibClone {
         return createDeterministicERC1967I(0, implementation, args, salt);
     }
 
-    /// @dev Creates a deterministic ERC1967I proxy with `implementation`,`args` and `salt`.
+    /// @dev Creates a deterministic ERC1967I proxy with `implementation`, `args` and `salt`.
     /// Deposits `value` ETH during deployment.
     /// Note: This method is intended for use in ERC4337 factories,
     /// which are expected to NOT revert if the proxy is already deployed.
@@ -1556,7 +1558,7 @@ library LibClone {
         }
     }
 
-    /// @dev Returns the initialization code of the ERC1967I proxy of `implementation`and `args`.
+    /// @dev Returns the initialization code of the ERC1967I proxy of `implementation` and `args`.
     function initCodeERC1967I(address implementation, bytes memory args)
         internal
         pure
@@ -1611,7 +1613,7 @@ library LibClone {
         }
     }
 
-    /// @dev Returns the address of the ERC1967I proxy of `implementation`, 'args` with `salt` by `deployer`.
+    /// @dev Returns the address of the ERC1967I proxy of `implementation`, `args` with `salt` by `deployer`.
     /// Note: The returned result has dirty upper 96 bits. Please clean if used in assembly.
     function predictDeterministicAddressERC1967I(
         address implementation,
@@ -1644,7 +1646,8 @@ library LibClone {
         assembly {
             args := mload(0x40)
             let n := and(0xffffffffff, sub(extcodesize(instance), 0x52))
-            extcodecopy(instance, add(args, 0x20), add(start, 0x52), add(n, 0x20))
+            let l := sub(n, and(0xffffff, mul(lt(start, n), start)))
+            extcodecopy(instance, args, add(start, 0x32), add(l, 0x40))
             mstore(args, mul(sub(n, start), lt(start, n))) // Store the length.
             mstore(0x40, add(mload(args), add(args, 0x40))) // Allocate memory.
         }
@@ -2239,7 +2242,8 @@ library LibClone {
         assembly {
             args := mload(0x40)
             let n := and(0xffffffffff, sub(extcodesize(instance), 0x52))
-            extcodecopy(instance, add(args, 0x20), add(start, 0x52), add(n, 0x20))
+            let l := sub(n, and(0xffffff, mul(lt(start, n), start)))
+            extcodecopy(instance, args, add(start, 0x32), add(l, 0x40))
             mstore(args, mul(sub(n, start), lt(start, n))) // Store the length.
             mstore(0x40, add(args, add(0x40, mload(args)))) // Allocate memory.
         }
@@ -2741,7 +2745,8 @@ library LibClone {
         assembly {
             args := mload(0x40)
             let n := and(0xffffffffff, sub(extcodesize(instance), 0x57))
-            extcodecopy(instance, add(args, 0x20), add(start, 0x57), add(n, 0x20))
+            let l := sub(n, and(0xffffff, mul(lt(start, n), start)))
+            extcodecopy(instance, args, add(start, 0x37), add(l, 0x40))
             mstore(args, mul(sub(n, start), lt(start, n))) // Store the length.
             mstore(0x40, add(args, add(0x40, mload(args)))) // Allocate memory.
         }

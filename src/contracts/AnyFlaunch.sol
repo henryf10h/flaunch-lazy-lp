@@ -7,6 +7,8 @@ import {LibClone} from '@solady/utils/LibClone.sol';
 import {LibString} from '@solady/utils/LibString.sol';
 import {Ownable} from '@solady/auth/Ownable.sol';
 
+import {PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
+
 import {AnyPositionManager} from '@flaunch/AnyPositionManager.sol';
 
 import {IAnyFlaunch} from '@flaunch-interfaces/IAnyFlaunch.sol';
@@ -19,8 +21,12 @@ import {IAnyFlaunch} from '@flaunch-interfaces/IAnyFlaunch.sol';
  */
 contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
 
+    error BaseURICannotBeEmpty();
     error CallerIsNotPositionManager();
     error CreatorFeeAllocationInvalid(uint24 _allocation, uint _maxAllocation);
+
+    event BaseURIUpdated(string _newBaseURI);
+    event MemecoinTreasuryImplementationUpdated(address _newImplementation);
 
     /**
      * Stores related memecoin contract implementation addresses.
@@ -37,7 +43,7 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     uint public constant MAX_CREATOR_ALLOCATION = 100_00;
 
     /// Our basic token information
-    string internal _name = 'Flaunch Revenue Streams (Partial)';
+    string internal _name = 'Flaunch Revenue Streams (Imported)';
     string internal _symbol = 'FLAUNCH';
 
     /// The base URI to represent the metadata
@@ -65,6 +71,8 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
      * @param _baseURI The default baseUri for the ERC721
      */
     constructor (string memory _baseURI) {
+        // Ensure that our BaseURI is not an empty value
+        if (bytes(_baseURI).length == 0) revert BaseURICannotBeEmpty();
         baseURI = _baseURI;
 
         _initializeOwner(msg.sender);
@@ -121,7 +129,20 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
      * @param _baseURI The new base URI
      */
     function setBaseURI(string memory _baseURI) external onlyOwner {
+        // Ensure that our BaseURI is not an empty value
+        if (bytes(_baseURI).length == 0) revert BaseURICannotBeEmpty();
         baseURI = _baseURI;
+        emit BaseURIUpdated(_baseURI);
+    }
+
+    /**
+     * Allows the contract owner to update the memecoin treasury implementation address.
+     * 
+     * @param _memecoinTreasuryImplementation The new memecoin treasury implementation address
+     */
+    function setMemecoinTreasuryImplementation(address _memecoinTreasuryImplementation) external onlyOwner {
+        memecoinTreasuryImplementation = _memecoinTreasuryImplementation;
+        emit MemecoinTreasuryImplementationUpdated(_memecoinTreasuryImplementation);
     }
 
     /**
@@ -175,15 +196,25 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     }
 
     /**
+     * Helper to show the {PoolId} address for the ERC721 token.
+     *
+     * @param _tokenId The token ID to get the {PoolId} for
+     *
+     * @return PoolId The {PoolId} for the token
+     */
+    function poolId(uint _tokenId) public view returns (PoolId) {
+        return positionManager.poolKey(tokenInfo[_tokenId].memecoin).toId();
+    }
+
+    /**
      * Returns the creator of the memecoin.
      *
      * @param _memecoin The {Memecoin} address
      */
     function creator(address _memecoin) public view returns (address creator_) {
-        // Handle case where the token has been burned
-        try this.ownerOf(tokenId[_memecoin]) returns (address owner) {
-            creator_ = owner;
-        } catch {}
+        // We use the internal call of `_ownerOf` as this will not revert when there is no
+        // owner attached to the ERC721. It will, instead, return a zero address as desired.
+        return _ownerOf(tokenId[_memecoin]);
     }
 
     /**

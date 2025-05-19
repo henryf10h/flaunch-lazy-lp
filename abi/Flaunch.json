@@ -18,6 +18,19 @@
     },
     {
       "type": "function",
+      "name": "MAX_BRIDGING_WINDOW",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "MAX_CREATOR_ALLOCATION",
       "inputs": [],
       "outputs": [
@@ -107,7 +120,7 @@
     },
     {
       "type": "function",
-      "name": "bridgingStatus",
+      "name": "bridgingFinalized",
       "inputs": [
         {
           "name": "_tokenId",
@@ -122,9 +135,33 @@
       ],
       "outputs": [
         {
-          "name": "_started",
+          "name": "_finalized",
           "type": "bool",
           "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "bridgingStarted",
+      "inputs": [
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_chainId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "_startedAt",
+          "type": "uint256",
+          "internalType": "uint256"
         }
       ],
       "stateMutability": "view"
@@ -223,6 +260,11 @@
             },
             {
               "name": "initialTokenFairLaunch",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "fairLaunchDuration",
               "type": "uint256",
               "internalType": "uint256"
             },
@@ -500,6 +542,25 @@
     },
     {
       "type": "function",
+      "name": "poolId",
+      "inputs": [
+        {
+          "name": "_tokenId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "PoolId"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "positionManager",
       "inputs": [],
       "outputs": [
@@ -609,6 +670,19 @@
     },
     {
       "type": "function",
+      "name": "setMemecoinImplementation",
+      "inputs": [
+        {
+          "name": "_memecoinImplementation",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "setMemecoinMetadata",
       "inputs": [
         {
@@ -625,6 +699,19 @@
           "name": "symbol_",
           "type": "string",
           "internalType": "string"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "setMemecoinTreasuryImplementation",
+      "inputs": [
+        {
+          "name": "_memecoinTreasuryImplementation",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "outputs": [],
@@ -788,6 +875,19 @@
     },
     {
       "type": "event",
+      "name": "BaseURIUpdated",
+      "inputs": [
+        {
+          "name": "_newBaseURI",
+          "type": "string",
+          "indexed": false,
+          "internalType": "string"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "Initialized",
       "inputs": [
         {
@@ -795,6 +895,32 @@
           "type": "uint64",
           "indexed": false,
           "internalType": "uint64"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "MemecoinImplementationUpdated",
+      "inputs": [
+        {
+          "name": "_newImplementation",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "MemecoinTreasuryImplementationUpdated",
+      "inputs": [
+        {
+          "name": "_newImplementation",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
         }
       ],
       "anonymous": false
@@ -1036,6 +1162,11 @@
     {
       "type": "error",
       "name": "TokenAlreadyBridged",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TokenAlreadyBridging",
       "inputs": []
     },
     {

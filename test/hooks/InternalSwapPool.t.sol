@@ -69,7 +69,7 @@ contract InternalSwapPoolTest is FlaunchTest {
      */
     function test_CanDepositFees(uint128 _amount0, uint128 _amount1, bool _flipped) public flipTokens(_flipped) {
         // Create our memecoin
-        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
 
         _bypassFairLaunch();
 
@@ -96,7 +96,7 @@ contract InternalSwapPoolTest is FlaunchTest {
 
     function test_CanSwap_ZeroForOne_ExactOutput(bool _flipped) public flipTokens(_flipped) {
         // Create our memecoin
-        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
 
         _bypassFairLaunch();
 
@@ -172,7 +172,7 @@ contract InternalSwapPoolTest is FlaunchTest {
 
     function test_CanSwap_ZeroForOne_ExactInput(bool _flipped) public flipTokens(_flipped) {
         // Create our Memecoin
-        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
 
         _bypassFairLaunch();
 

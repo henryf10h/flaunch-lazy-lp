@@ -34,6 +34,7 @@ contract MemecoinTreasuryTest is FlaunchTest {
                 symbol: 'TOKEN',
                 tokenUri: 'https://flaunch.gg/',
                 initialTokenFairLaunch: supplyShare(10),
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: address(this),
                 creatorFeeAllocation: 50_00,

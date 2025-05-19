@@ -26,19 +26,6 @@
     },
     {
       "type": "function",
-      "name": "FAIR_LAUNCH_WINDOW",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
       "name": "closePosition",
       "inputs": [
         {
@@ -146,6 +133,11 @@
         },
         {
           "name": "_initialTokenFairLaunch",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_fairLaunchDuration",
           "type": "uint256",
           "internalType": "uint256"
         }

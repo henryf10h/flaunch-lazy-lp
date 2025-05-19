@@ -7,6 +7,7 @@ import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
 /**
  * This zap allows the creator to instantly flaunch their coin, without any deployment fees,
  * with the following settings:
+ *
  * - $10k starting market cap
  * - 60% of the total supply goes to the fair launch
  * - fair launch starts instantly
@@ -20,7 +21,7 @@ contract FastFlaunchZap {
      * @member name Name of the token
      * @member symbol Symbol of the token
      * @member tokenUri The generated ERC721 token URI
-     * @member creator The address that will receive the ERC721 ownership and premined ERC20 tokens
+     * @member creator The address that will receive the ERC721 ownership
      */
     struct FastFlaunchParams {
         string name;
@@ -31,6 +32,9 @@ contract FastFlaunchZap {
 
     /// The Flaunch {PositionManager} contract
     PositionManager public immutable positionManager;
+
+    /// The share that the creator will receive
+    uint24 public constant CREATOR_FEE_ALLOCATION = 80_00;
 
     /// The USDC market cap of the flaunched coins
     uint public constant USDC_MARKET_CAP = 10_000e6;
@@ -49,7 +53,7 @@ contract FastFlaunchZap {
 
     /**
      * Flaunches a token using a subset of the traditional flaunch parameters and filling the
-     * rest with a standardised value.
+     * rest with standardised values.
      */
     function flaunch(FastFlaunchParams calldata _params) external returns (address memecoin_) {
         memecoin_ = positionManager.flaunch(
@@ -61,8 +65,9 @@ contract FastFlaunchZap {
                 creator: _params.creator,
 
                 // Fixed flaunch parameters
-                creatorFeeAllocation: 80_00,
+                creatorFeeAllocation: CREATOR_FEE_ALLOCATION,
                 initialTokenFairLaunch: FAIR_LAUNCH_SUPPLY,
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 flaunchAt: 0,
                 initialPriceParams: abi.encode(USDC_MARKET_CAP),

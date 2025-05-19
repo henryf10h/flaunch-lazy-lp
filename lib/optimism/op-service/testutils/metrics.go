@@ -17,7 +17,7 @@ type TestDerivationMetrics struct {
 	FnRecordChannelTimedOut   func()
 }
 
-func (t *TestDerivationMetrics) CountSequencedTxs(count int) {
+func (t *TestDerivationMetrics) CountSequencedTxsInBlock(txns int, deposits int) {
 }
 
 func (t *TestDerivationMetrics) RecordSequencerBuildingDiffTime(duration time.Duration) {
@@ -70,18 +70,6 @@ func (t *TestDerivationMetrics) RecordFrame() {
 
 func (n *TestDerivationMetrics) RecordDerivedBatches(batchType string) {
 }
-
-type TestRPCMetrics struct{}
-
-func (n *TestRPCMetrics) RecordRPCServerRequest(method string) func() {
-	return func() {}
-}
-
-func (n *TestRPCMetrics) RecordRPCClientRequest(method string) func(err error) {
-	return func(err error) {}
-}
-
-func (n *TestRPCMetrics) RecordRPCClientResponse(method string, err error) {}
 
 func (t *TestDerivationMetrics) SetDerivationIdle(idle bool) {}
 

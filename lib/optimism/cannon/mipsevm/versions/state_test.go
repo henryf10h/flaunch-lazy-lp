@@ -16,18 +16,18 @@ import (
 )
 
 func TestNewFromState(t *testing.T) {
-	t.Run("singlethreaded-2", func(t *testing.T) {
+	t.Run("singlethreaded-latestVersion", func(t *testing.T) {
 		actual, err := NewFromState(singlethreaded.CreateEmptyState())
 		require.NoError(t, err)
 		require.IsType(t, &singlethreaded.State{}, actual.FPVMState)
-		require.Equal(t, VersionSingleThreaded2, actual.Version)
+		require.Equal(t, GetCurrentSingleThreaded(), actual.Version)
 	})
 
-	t.Run("multithreaded", func(t *testing.T) {
+	t.Run("multithreaded-latestVersion", func(t *testing.T) {
 		actual, err := NewFromState(multithreaded.CreateEmptyState())
 		require.NoError(t, err)
 		require.IsType(t, &multithreaded.State{}, actual.FPVMState)
-		require.Equal(t, VersionMultiThreaded, actual.Version)
+		require.Equal(t, GetCurrentMultiThreaded(), actual.Version)
 	})
 }
 
@@ -58,8 +58,8 @@ func TestVersionsOtherThanZeroDoNotSupportJSON(t *testing.T) {
 		version     StateVersion
 		createState func() mipsevm.FPVMState
 	}{
-		{VersionSingleThreaded2, func() mipsevm.FPVMState { return singlethreaded.CreateEmptyState() }},
-		{VersionMultiThreaded, func() mipsevm.FPVMState { return multithreaded.CreateEmptyState() }},
+		{GetCurrentSingleThreaded(), func() mipsevm.FPVMState { return singlethreaded.CreateEmptyState() }},
+		{GetCurrentMultiThreaded(), func() mipsevm.FPVMState { return multithreaded.CreateEmptyState() }},
 	}
 	for _, test := range tests {
 		test := test

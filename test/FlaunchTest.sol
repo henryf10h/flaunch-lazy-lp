@@ -17,12 +17,14 @@ import {BuyBackAndBurnFlay} from '@flaunch/subscribers/BuyBackAndBurnFlay.sol';
 import {FairLaunch} from '@flaunch/hooks/FairLaunch.sol';
 import {FastFlaunchZap} from '@flaunch/zaps/FastFlaunchZap.sol';
 import {FeeDistributor} from '@flaunch/hooks/FeeDistributor.sol';
+import {FeeEscrow} from '@flaunch/escrows/FeeEscrow.sol';
 import {FeeExemptions} from '@flaunch/hooks/FeeExemptions.sol';
 import {Flaunch} from '@flaunch/Flaunch.sol';
 import {AnyFlaunch} from '@flaunch/AnyFlaunch.sol';
 import {FlaunchFeeExemption} from '@flaunch/price/FlaunchFeeExemption.sol';
 import {FlaunchZap} from '@flaunch/zaps/FlaunchZap.sol';
 import {FlayBurner} from '@flaunch/libraries/FlayBurner.sol';
+import {IndexerSubscriber} from '@flaunch/subscribers/Indexer.sol';
 import {MerkleAirdrop} from '@flaunch/creator-tools/MerkleAirdrop.sol';
 import {SnapshotAirdrop} from '@flaunch/creator-tools/SnapshotAirdrop.sol';
 import {InitialPrice} from '@flaunch/price/InitialPrice.sol';
@@ -30,7 +32,7 @@ import {MemecoinMock} from 'test/mocks/MemecoinMock.sol';
 import {MemecoinTreasury} from '@flaunch/treasury/MemecoinTreasury.sol';
 import {PoolSwap} from '@flaunch/zaps/PoolSwap.sol';
 import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
-import {ReferralEscrow} from '@flaunch/referrals/ReferralEscrow.sol';
+import {ReferralEscrow} from '@flaunch/escrows/ReferralEscrow.sol';
 import {StaticFeeCalculator} from '@flaunch/fees/StaticFeeCalculator.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
 import {TreasuryActionManager} from '@flaunch/treasury/ActionManager.sol';
@@ -73,6 +75,7 @@ contract FlaunchTest is Deployers {
     SnapshotAirdrop internal snapshotAirdrop;
     PoolModifyLiquidityTest internal poolModifyPosition;
     PoolSwap internal poolSwap;
+    FeeEscrow internal feeEscrow;
     PositionManagerMock internal positionManager;
     AnyPositionManagerMock internal anyPositionManager;
     FeeExemptions internal feeExemptions;
@@ -83,6 +86,7 @@ contract FlaunchTest is Deployers {
     ReferralEscrow internal referralEscrow;
     TreasuryActionManager internal actionManager;
     TreasuryManagerFactory internal treasuryManagerFactory;
+    IndexerSubscriber internal indexer;
 
     WhitelistFairLaunch internal whitelistFairLaunch;
     WhitelistPoolSwap internal whitelistPoolSwap;
@@ -153,6 +157,10 @@ contract FlaunchTest is Deployers {
         fairLaunch = new FairLaunch(poolManager);
         fairLaunch.grantRole(ProtocolRoles.POSITION_MANAGER, VALID_POSITION_MANAGER_ADDRESS);
 
+        // Deploy the FeeEscrow
+        indexer = new IndexerSubscriber();
+        feeEscrow = new FeeEscrow(address(flETH), address(indexer));
+
         // Deploy our Locker to a specific address that is valid for our hooks configuration
         deployCodeTo('PositionManagerMock.sol', abi.encode(
             address(WETH),
@@ -162,6 +170,7 @@ contract FlaunchTest is Deployers {
             address(this),
             address(this),
             governance,
+            address(feeEscrow),
             address(feeExemptions),
             actionManager,
             bidWall,
@@ -184,6 +193,7 @@ contract FlaunchTest is Deployers {
             address(this),
             address(this),
             governance,
+            address(feeEscrow),
             address(feeExemptions),
             address(actionManager),
             address(bidWall)
@@ -200,12 +210,14 @@ contract FlaunchTest is Deployers {
 
         fairLaunch.grantRole(ProtocolRoles.POSITION_MANAGER, address(positionManager));
 
-        referralEscrow = new ReferralEscrow(address(flETH), address(positionManager));
+        referralEscrow = new ReferralEscrow(address(flETH), address(this));
         referralEscrow.setPoolSwap(address(poolSwap));
         positionManager.setReferralEscrow(payable(address(referralEscrow)));
+        referralEscrow.grantRole(ProtocolRoles.POSITION_MANAGER, address(positionManager));
+        referralEscrow.grantRole(ProtocolRoles.POSITION_MANAGER, address(anyPositionManager));
 
         // Deploy our TreasuryManagerFactory and register our flaunch contract
-        treasuryManagerFactory = new TreasuryManagerFactory(address(this));
+        treasuryManagerFactory = new TreasuryManagerFactory(address(this), address(feeEscrow));
         treasuryManagerFactory.grantRole(ProtocolRoles.FLAUNCH, address(flaunch));
 
         // Deploy our airdrops
@@ -227,6 +239,10 @@ contract FlaunchTest is Deployers {
         // Deploy and approve our Flay Buy Back subscriber
         flayBurner = new FlayBurner(address(flETH));
         buyBackAndBurnFlay = new BuyBackAndBurnFlay(address(flETH), address(poolManager), address(positionManager.notifier()));
+
+        // Our FeeEscrow depends on the {IndexerSubscriber} to be attached
+        positionManager.notifier().subscribe(address(indexer), '');
+        indexer.setNotifierFlaunch(address(positionManager.notifier()), address(flaunch));
     }
 
     /**

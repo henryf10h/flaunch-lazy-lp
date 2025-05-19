@@ -22,4 +22,5 @@ abstract contract StoreKeys {
     bytes32 internal constant TS_UNI_FEE0 = 0x84457b11f2602289c00904214483ea820055ea325cc54ad9b512e76c6541dfb4;
     bytes32 internal constant TS_UNI_FEE1 = 0x6bc3f16992c8e44a3018b72b6d7aec54e64e1cdec74e64c5154c782ffe8aff2d;
 
+    bytes32 internal constant IS_PREMINE = 0x46c2c7d893f5d50e8954da6a79cea2517a5406a3015b0847f2b3698f19e905ea;
 }

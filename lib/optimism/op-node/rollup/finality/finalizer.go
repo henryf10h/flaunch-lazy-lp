@@ -142,7 +142,7 @@ func (fi *Finalizer) OnEvent(ev event.Event) bool {
 	case FinalizeL1Event:
 		fi.onL1Finalized(x.FinalizedL1)
 	case engine.SafeDerivedEvent:
-		fi.onDerivedSafeBlock(x.Safe, x.DerivedFrom)
+		fi.onDerivedSafeBlock(x.Safe, x.Source)
 	case derive.DeriverIdleEvent:
 		fi.onDerivationIdle(x.Origin)
 	case rollup.ResetEvent:
@@ -224,7 +224,6 @@ func (fi *Finalizer) tryFinalize() {
 		// Sanity check the finality signal of L1.
 		// Even though the signal is trusted and we do the below check also,
 		// the signal itself has to be canonical to proceed.
-		// TODO(#10724): This check could be removed if the finality signal is fully trusted, and if tests were more flexible for this case.
 		signalRef, err := fi.l1Fetcher.L1BlockRefByNumber(ctx, fi.finalizedL1.Number)
 		if err != nil {
 			fi.emitter.Emit(rollup.L1TemporaryErrorEvent{Err: fmt.Errorf("failed to check if on finalizing L1 chain, could not fetch block %d: %w", fi.finalizedL1.Number, err)})

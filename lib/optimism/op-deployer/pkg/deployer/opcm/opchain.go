@@ -9,13 +9,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// PermissionedGameStartingAnchorRoots is a root of bytes32(hex"dead") for the permissioned game at block 0,
+// PermissionedGameStartingAnchorRoot is a root of bytes32(hex"dead") for the permissioned game at block 0,
 // and no root for the permissionless game.
-var PermissionedGameStartingAnchorRoots = []byte{
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xde, 0xad, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+var PermissionedGameStartingAnchorRoot = []byte{
+	0xde, 0xad, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 }
 
-type DeployOPChainInputV160 struct {
+type DeployOPChainInput struct {
 	OpChainProxyAdminOwner common.Address
 	SystemConfigOwner      common.Address
 	Batcher                common.Address
@@ -37,19 +40,17 @@ type DeployOPChainInputV160 struct {
 	DisputeClockExtension        uint64
 	DisputeMaxClockDuration      uint64
 	AllowCustomDisputeParameters bool
+
+	OperatorFeeScalar   uint32
+	OperatorFeeConstant uint64
 }
 
-func (input *DeployOPChainInputV160) InputSet() bool {
+func (input *DeployOPChainInput) InputSet() bool {
 	return true
 }
 
-func (input *DeployOPChainInputV160) StartingAnchorRoots() []byte {
-	return PermissionedGameStartingAnchorRoots
-}
-
-type DeployOPChainInputIsthmus struct {
-	DeployOPChainInputV160
-	SystemConfigFeeAdmin common.Address
+func (input *DeployOPChainInput) StartingAnchorRoot() []byte {
+	return PermissionedGameStartingAnchorRoot
 }
 
 type DeployOPChainOutput struct {
@@ -62,9 +63,9 @@ type DeployOPChainOutput struct {
 	L1CrossDomainMessengerProxy       common.Address
 	// Fault proof contracts below.
 	OptimismPortalProxy                common.Address
+	ETHLockboxProxy                    common.Address `evm:"ethLockboxProxy"`
 	DisputeGameFactoryProxy            common.Address
 	AnchorStateRegistryProxy           common.Address
-	AnchorStateRegistryImpl            common.Address
 	FaultDisputeGame                   common.Address
 	PermissionedDisputeGame            common.Address
 	DelayedWETHPermissionedGameProxy   common.Address
@@ -79,45 +80,8 @@ type DeployOPChainScript struct {
 	Run func(input, output common.Address) error
 }
 
-func DeployOPChainV160(host *script.Host, input DeployOPChainInputV160) (DeployOPChainOutput, error) {
-	return deployOPChain(host, input)
-}
-
-func DeployOPChainIsthmus(host *script.Host, input DeployOPChainInputIsthmus) (DeployOPChainOutput, error) {
-	return deployOPChain(host, input)
-}
-
-func deployOPChain[T any](host *script.Host, input T) (DeployOPChainOutput, error) {
-	var dco DeployOPChainOutput
-	inputAddr := host.NewScriptAddress()
-	outputAddr := host.NewScriptAddress()
-
-	cleanupInput, err := script.WithPrecompileAtAddress[*T](host, inputAddr, &input)
-	if err != nil {
-		return dco, fmt.Errorf("failed to insert DeployOPChainInput precompile: %w", err)
-	}
-	defer cleanupInput()
-	host.Label(inputAddr, "DeployOPChainInput")
-
-	cleanupOutput, err := script.WithPrecompileAtAddress[*DeployOPChainOutput](host, outputAddr, &dco,
-		script.WithFieldSetter[*DeployOPChainOutput])
-	if err != nil {
-		return dco, fmt.Errorf("failed to insert DeployOPChainOutput precompile: %w", err)
-	}
-	defer cleanupOutput()
-	host.Label(outputAddr, "DeployOPChainOutput")
-
-	deployScript, cleanupDeploy, err := script.WithScript[DeployOPChainScript](host, "DeployOPChain.s.sol", "DeployOPChain")
-	if err != nil {
-		return dco, fmt.Errorf("failed to load DeployOPChain script: %w", err)
-	}
-	defer cleanupDeploy()
-
-	if err := deployScript.Run(inputAddr, outputAddr); err != nil {
-		return dco, fmt.Errorf("failed to run DeployOPChain script: %w", err)
-	}
-
-	return dco, nil
+func DeployOPChain(host *script.Host, input DeployOPChainInput) (DeployOPChainOutput, error) {
+	return RunScriptSingle[DeployOPChainInput, DeployOPChainOutput](host, input, "DeployOPChain.s.sol", "DeployOPChain")
 }
 
 type ReadImplementationAddressesInput struct {
@@ -129,6 +93,7 @@ type ReadImplementationAddressesInput struct {
 type ReadImplementationAddressesOutput struct {
 	DelayedWETH                  common.Address
 	OptimismPortal               common.Address
+	ETHLockbox                   common.Address `evm:"ethLockbox"`
 	SystemConfig                 common.Address
 	L1CrossDomainMessenger       common.Address
 	L1ERC721Bridge               common.Address

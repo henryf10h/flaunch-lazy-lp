@@ -56,10 +56,10 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
     error CallerIsNotBidWall();
     error CannotBeInitializedDirectly();
     error UnknownPool(PoolId _poolId);
-    error CallerIsNotCreator();
+    error CallerIsNotApprovedCreator();
 
-    /// Emitted when a memecoin is approved to be flaunched by a creator
-    event MemecoinApproved(address _memecoin, address _creator);
+    /// Emitted when a creator is approved to flaunch
+    event CreatorApproved(address _creator, bool _isApproved);
 
     /// Emitted when a Flaunch pool is created
     event PoolCreated(PoolId indexed _poolId, address _memecoin, address _memecoinTreasury, uint _tokenId, bool _currencyFlipped, FlaunchParams _params);
@@ -83,6 +83,7 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
      * @member protocolOwner The EOA that will be the initial owner
      * @member protocolFeeRecipient The recipient EOA of all
      * @member flayGovernance The $FLAY token governance address
+     * @member feeEscrow The {FeeEscrow} contract to be used by the PositionManager
      * @member feeExemptions The default global FeeExemption values
      * @member actionManager The {TreasuryActionManager} contract
      * @member bidWall The {BidWall} contract to be used by the PositionManager
@@ -95,6 +96,7 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         address protocolOwner;
         address protocolFeeRecipient;
         address flayGovernance;
+        address feeEscrow;
         FeeExemptions feeExemptions;
         TreasuryActionManager actionManager;
         address bidWall;
@@ -144,15 +146,15 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
     /// Store our {Notifier} contract
     Notifier public notifier;
 
-    /// Stores the approved memecoin to creator mapping
-    mapping(address _memecoin => address _creator) public approvedMemecoinToCreator;
+    /// Stores the approved memecoin creators
+    mapping(address _creator => bool isApproved) public approvedMemecoinCreator;
 
     /**
      * Initializes our {BaseHook} contract and initializes all implemented hooks.
      */
     constructor (ConstructorParams memory params)
         BaseHook(params.poolManager)
-        FeeDistributor(params.nativeToken, params.feeDistribution, params.protocolOwner, params.flayGovernance)
+        FeeDistributor(params.nativeToken, params.feeDistribution, params.protocolOwner, params.flayGovernance, params.feeEscrow)
     {
         // Set our contract references
         initialPrice = params.initialPrice;
@@ -183,8 +185,8 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
      * @dev Can only be called by the owner, to prevent duplicate poolKeys
      */
     function flaunch(FlaunchParams calldata _params) external {
-        // allow only the approved memecoins to be flaunched by the approved creator
-        if (msg.sender != approvedMemecoinToCreator[_params.memecoin]) revert CallerIsNotCreator();
+        // allow only the approved creators to flaunch
+        if (!approvedMemecoinCreator[msg.sender]) revert CallerIsNotApprovedCreator();
 
         if (flaunchContract.tokenId(_params.memecoin) != 0) revert AlreadyFlaunched();
 
@@ -320,7 +322,8 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
          * our pool.
          */
 
-        (uint tokenIn, uint tokenOut) = _internalSwap(poolManager, _key, _params, nativeToken == Currency.unwrap(_key.currency0));
+        bool nativeIsZero = nativeToken == Currency.unwrap(_key.currency0);
+        (uint tokenIn, uint tokenOut) = _internalSwap(poolManager, _key, _params, nativeIsZero);
         if (tokenIn + tokenOut != 0) {
             // Update our hook delta to reduce the upcoming swap amount to show that we have
             // already spent some of the ETH and received some of the underlying ERC20.
@@ -349,6 +352,14 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
 
         // Capture the beforeSwap tick value before actioning our Uniswap swap
         (, _beforeSwapTick,,) = poolManager.getSlot0(_key.toId());
+
+        // Check if the BidWall has become stale, and allow liquidity to be extracted before a
+        // threshold has been built.
+        bidWall.checkStalePosition({
+            _poolKey: _key,
+            _currentTick: _beforeSwapTick,
+            _nativeIsZero: nativeIsZero
+        });
 
         // Set our return selector
         selector_ = IHooks.beforeSwap.selector;
@@ -520,14 +531,14 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
     /**
      * Allows the creator of a memecoin to be approved to flaunch.
      * 
-     * @dev Only callable by the owner. Can also be used to update the creator of a memecoin.
+     * @dev Only callable by the owner
      *
-     * @param _memecoin The memecoin to approve
-     * @param _creator The creator of the memecoin
+     * @param _creator The creator to approve
+     * @param _isApproved Whether the creator is approved
      */
-    function approveMemecoin(address _memecoin, address _creator) public onlyOwner {
-        approvedMemecoinToCreator[_memecoin] = _creator;
-        emit MemecoinApproved(_memecoin, _creator);
+    function approveCreator(address _creator, bool _isApproved) public onlyOwner {
+        approvedMemecoinCreator[_creator] = _isApproved;
+        emit CreatorApproved(_creator, _isApproved);
     }
 
     /**
@@ -657,7 +668,9 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         // Find the distribution amount across our different users. The amount that treasury
         // receives will be determined by variables throughout the distribution flow, such as
         // the BidWall being disabled, etc.
-        (uint bidWallFee, uint creatorFee, uint protocolFee) = feeSplit(poolId, distributeAmount);
+        // @dev Counter to the naming conventions of `feeSplit`, the `creatorFee_` is actually used
+        // as an LP fee in the AnyPositionManager for use in a `donate` call.
+        (uint bidWallFee, uint lpFee, uint protocolFee) = feeSplit(poolId, distributeAmount);
         uint treasuryFee;
 
         // Load our memecoin so that we can query the creator and treasury
@@ -667,17 +680,20 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         address poolCreator = flaunchContract.creator(memecoin);
         bool poolCreatorBurned = poolCreator == address(0);
 
-        if (creatorFee != 0) {
-            // Ensure that the pool creator has not burned their ownership and send them the fees
-            if (!poolCreatorBurned) {
-                _allocateFees(poolId, poolCreator, creatorFee);
-            }
-            // If the pool creator has burned their ownership, then we instead send fees directly
-            // to the BidWall.
-            else {
-                bidWallFee += creatorFee;
-                creatorFee = 0;
-            }
+        if (lpFee != 0) {
+            /**
+             * Any LP fees are donated via Uniswap V4. Donates the given currency amounts to the in-range
+             * liquidity providers of a pool.
+             *
+             * @dev Calls to donate can be frontrun adding just-in-time liquidity, with the aim of receiving
+             * a portion donated funds. As our threshold is low enough this shouldn't be an issue.
+             */
+            poolManager.donate({
+                key: _poolKey,
+                amount0: Currency.unwrap(_poolKey.currency0) == nativeToken ? lpFee : 0,
+                amount1: Currency.unwrap(_poolKey.currency1) == nativeToken ? 0 : lpFee,
+                hookData: abi.encode('')
+            });
         }
 
         if (bidWallFee != 0) {
@@ -712,7 +728,7 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
             _allocateFees(poolId, protocolFeeRecipient, protocolFee);
         }
 
-        emit PoolFeesDistributed(poolId, distributeAmount, creatorFee, bidWallFee, treasuryFee, protocolFee);
+        emit PoolFeesDistributed(poolId, distributeAmount, lpFee, bidWallFee, treasuryFee, protocolFee);
     }
 
     /**

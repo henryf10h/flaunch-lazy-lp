@@ -25,11 +25,20 @@ library SafeTransferLib {
     /// @dev The ERC20 `approve` has failed.
     error ApproveFailed();
 
+    /// @dev The ERC20 `totalSupply` query has failed.
+    error TotalSupplyQueryFailed();
+
     /// @dev The Permit2 operation has failed.
     error Permit2Failed();
 
     /// @dev The Permit2 amount must be less than `2**160 - 1`.
     error Permit2AmountOverflow();
+
+    /// @dev The Permit2 approve operation has failed.
+    error Permit2ApproveFailed();
+
+    /// @dev The Permit2 lockdown operation has failed.
+    error Permit2LockdownFailed();
 
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
     /*                         CONSTANTS                          */
@@ -42,7 +51,7 @@ library SafeTransferLib {
     /// storage reads and writes, but low enough to prevent griefing.
     uint256 internal constant GAS_STIPEND_NO_GRIEF = 100000;
 
-    /// @dev The unique EIP-712 domain domain separator for the DAI token contract.
+    /// @dev The unique EIP-712 domain separator for the DAI token contract.
     bytes32 internal constant DAI_DOMAIN_SEPARATOR =
         0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7;
 
@@ -396,6 +405,22 @@ library SafeTransferLib {
         }
     }
 
+    /// @dev Returns the total supply of the `token`.
+    /// Reverts if the token does not exist or does not implement `totalSupply()`.
+    function totalSupply(address token) internal view returns (uint256 result) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, 0x18160ddd) // `totalSupply()`.
+            if iszero(
+                and(gt(returndatasize(), 0x1f), staticcall(gas(), token, 0x1c, 0x04, 0x00, 0x20))
+            ) {
+                mstore(0x00, 0x54cd9435) // `TotalSupplyQueryFailed()`.
+                revert(0x1c, 0x04)
+            }
+            result := mload(0x00)
+        }
+    }
+
     /// @dev Sends `amount` of ERC20 `token` from `from` to `to`.
     /// If the initial attempt fails, try to use Permit2 to transfer the token.
     /// Reverts upon failure.
@@ -470,10 +495,13 @@ library SafeTransferLib {
                 if eq(mload(0x00), DAI_DOMAIN_SEPARATOR) {
                     mstore(0x14, owner)
                     mstore(0x00, 0x7ecebe00000000000000000000000000) // `nonces(address)`.
-                    mstore(add(m, 0x94), staticcall(gas(), token, 0x10, 0x24, add(m, 0x54), 0x20))
+                    mstore(
+                        add(m, 0x94),
+                        lt(iszero(amount), staticcall(gas(), token, 0x10, 0x24, add(m, 0x54), 0x20))
+                    )
                     mstore(m, 0x8fcbaf0c000000000000000000000000) // `IDAIPermit.permit`.
                     // `nonces` is already at `add(m, 0x54)`.
-                    // `1` is already stored at `add(m, 0x94)`.
+                    // `amount != 0` is already stored at `add(m, 0x94)`.
                     mstore(add(m, 0xb4), and(0xff, v))
                     mstore(add(m, 0xd4), r)
                     mstore(add(m, 0xf4), s)
@@ -540,6 +568,43 @@ library SafeTransferLib {
             if iszero( // Revert if token does not have code, or if the call fails.
             mul(extcodesize(token), call(gas(), p, 0, add(m, 0x1c), 0x184, codesize(), 0x00))) {
                 mstore(0x00, 0x6b836e6b) // `Permit2Failed()`.
+                revert(0x1c, 0x04)
+            }
+        }
+    }
+
+    /// @dev Approves `spender` to spend `amount` of `token` for `address(this)`.
+    function permit2Approve(address token, address spender, uint160 amount, uint48 expiration)
+        internal
+    {
+        /// @solidity memory-safe-assembly
+        assembly {
+            let addressMask := shr(96, not(0))
+            let m := mload(0x40)
+            mstore(m, 0x87517c45) // `approve(address,address,uint160,uint48)`.
+            mstore(add(m, 0x20), and(addressMask, token))
+            mstore(add(m, 0x40), and(addressMask, spender))
+            mstore(add(m, 0x60), and(addressMask, amount))
+            mstore(add(m, 0x80), and(0xffffffffffff, expiration))
+            if iszero(call(gas(), PERMIT2, 0, add(m, 0x1c), 0xa0, codesize(), 0x00)) {
+                mstore(0x00, 0x324f14ae) // `Permit2ApproveFailed()`.
+                revert(0x1c, 0x04)
+            }
+        }
+    }
+
+    /// @dev Revokes an approval for `token` and `spender` for `address(this)`.
+    function permit2Lockdown(address token, address spender) internal {
+        /// @solidity memory-safe-assembly
+        assembly {
+            let m := mload(0x40)
+            mstore(m, 0xcc53287f) // `Permit2.lockdown`.
+            mstore(add(m, 0x20), 0x20) // Offset of the `approvals`.
+            mstore(add(m, 0x40), 1) // `approvals.length`.
+            mstore(add(m, 0x60), shr(96, shl(96, token)))
+            mstore(add(m, 0x80), shr(96, shl(96, spender)))
+            if iszero(call(gas(), PERMIT2, 0, add(m, 0x1c), 0xa0, codesize(), 0x00)) {
+                mstore(0x00, 0x96b3de23) // `Permit2LockdownFailed()`.
                 revert(0x1c, 0x04)
             }
         }

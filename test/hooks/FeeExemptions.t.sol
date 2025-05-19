@@ -32,7 +32,7 @@ contract FeeExemptionsTest is FlaunchTest {
         _deployPlatform();
 
         // Create our memecoin
-        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 0, 0, abi.encode(''), abi.encode(1_000)));
+        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 0, 0, abi.encode(''), abi.encode(1_000)));
 
         // Reference our `_poolKey` for later tests
         _poolKey = positionManager.poolKey(memecoin);

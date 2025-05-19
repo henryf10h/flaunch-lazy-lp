@@ -57,9 +57,13 @@ contract SignatureCheckerLibTest is SoladyTest {
     }
 
     function testSignatureCheckerOnWalletWithMatchingSignerAndSignature() public {
-        _checkSignatureBothModes(
-            address(mockERC1271Wallet), TEST_SIGNED_MESSAGE_HASH, SIGNATURE, true
-        );
+        address signer = address(mockERC1271Wallet);
+        bytes32 hash = TEST_SIGNED_MESSAGE_HASH;
+        bytes memory signature = SIGNATURE;
+        _checkSignature(true, signer, hash, signature, true);
+        _checkSignature(false, signer, hash, signature, true);
+        vm.etch(signer, "");
+        _checkSignature(false, signer, hash, signature, false);
     }
 
     function testSignatureCheckerOnWalletWithInvalidSigner() public {
@@ -358,16 +362,6 @@ contract SignatureCheckerLibTest is SoladyTest {
         assertEq(SignatureCheckerLib.isValidSignatureNow(signer, hash, signature), false);
     }
 
-    function _etchNicksFactory() internal returns (address nicksFactory) {
-        nicksFactory = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-        if (nicksFactory.code.length != 0) {
-            vm.etch(
-                nicksFactory,
-                hex"7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3"
-            );
-        }
-    }
-
     bytes32 private constant _ERC6492_DETECTION_SUFFIX =
         0x6492649264926492649264926492649264926492649264926492649264926492;
 
@@ -388,7 +382,7 @@ contract SignatureCheckerLibTest is SoladyTest {
     }
 
     function _erc6492TestTemps() internal returns (_ERC6492TestTemps memory t) {
-        t.factory = _etchNicksFactory();
+        t.factory = _NICKS_FACTORY;
         assertGt(t.factory.code.length, 0);
         (t.eoa, t.privateKey) = _randomSigner();
         t.initcode = abi.encodePacked(type(MockERC1271Wallet).creationCode, uint256(uint160(t.eoa)));
@@ -483,6 +477,7 @@ contract SignatureCheckerLibTest is SoladyTest {
     }
 
     function testERC6492AllowSideEffectsPostDeploy() public {
+        _etchERC6492Verifier();
         _ERC6492TestTemps memory t = _erc6492TestTemps();
         (bool success,) = t.factory.call(t.factoryCalldata);
         require(success);
@@ -501,6 +496,7 @@ contract SignatureCheckerLibTest is SoladyTest {
     }
 
     function testERC6492AllowSideEffectsPreDeploy() public {
+        _etchERC6492Verifier();
         _ERC6492TestTemps memory t = _erc6492TestTemps();
         t.result = SignatureCheckerLib.isValidERC6492SignatureNowAllowSideEffects(
             t.smartAccount, t.digest, t.innerSignature
@@ -532,16 +528,28 @@ contract SignatureCheckerLibTest is SoladyTest {
         assertEq(MockERC1271Wallet(t.smartAccount).signer(), t.eoa);
     }
 
+    function _etchERC6492Verifier() internal returns (address verifier) {
+        _ERC6492TestTemps memory t;
+        t.initcode =
+            hex"6040600b3d3960403df3fe36383d373d3d6020515160208051013d3d515af160203851516084018038385101606037303452813582523838523490601c34355afa34513060e01b141634f3";
+        t.factory = _NICKS_FACTORY;
+        t.salt = 0x0000000000000000000000000000000000000000ebfa269e1c28e801a0dc87e2;
+        verifier = LibClone.predictDeterministicAddress(keccak256(t.initcode), t.salt, t.factory);
+        assertEq(_nicksCreate2(0, t.salt, t.initcode), verifier);
+        assertGt(verifier.code.length, 0);
+        emit LogBytes32(keccak256(t.initcode));
+        emit LogBytes(verifier.code);
+    }
+
     function _etchERC6492RevertingVerifier() internal returns (address revertingVerifier) {
         _ERC6492TestTemps memory t;
         t.initcode =
             hex"6040600b3d3960403df3fe36383d373d3d6020515160208051013d3d515af160203851516084018038385101606037303452813582523838523490601c34355afa34513060e01b141634fd";
-        t.factory = _etchNicksFactory();
+        t.factory = _NICKS_FACTORY;
         t.salt = 0x000000000000000000000000000000000000000068f35e1510740001fd13984a;
-        (bool success,) = t.factory.call(abi.encodePacked(t.salt, t.initcode));
         revertingVerifier =
             LibClone.predictDeterministicAddress(keccak256(t.initcode), t.salt, t.factory);
-        assertTrue(success);
+        assertEq(_nicksCreate2(0, t.salt, t.initcode), revertingVerifier);
         assertGt(revertingVerifier.code.length, 0);
         emit LogBytes32(keccak256(t.initcode));
         emit LogBytes(revertingVerifier.code);

@@ -17,7 +17,18 @@ import {IInitialPrice} from '@flaunch-interfaces/IInitialPrice.sol';
  */
 contract InitialPrice is IInitialPrice, Ownable {
 
+    event FlaunchFeeThresholdUpdated(uint _flaunchFeeThreshold);
     event InitialSqrtPriceX96Updated(uint160 _unflipped, uint160 _flipped);
+
+    /**
+     * The struct of data that should be passed from the flaunching flow to define the
+     * desired market cap when a token is flaunching.
+     *
+     * @member usdcMarketCap The USDC price of the token market cap
+     */
+    struct InitialPriceParams {
+        uint usdcMarketCap;
+    }
 
     /// Stores the initial `sqrtPriceX96` that will be used for each pool
     struct InitialSqrtPriceX96 {
@@ -28,8 +39,11 @@ contract InitialPrice is IInitialPrice, Ownable {
     /// Our starting token sqrtPriceX96
     InitialSqrtPriceX96 internal _initialSqrtPriceX96;
 
+    /// The minimum flaunch price that would incur a flaunching fee
+    uint public flaunchFeeThreshold;
+
     /// Our static flaunching fee
-    uint internal immutable flaunchFee;
+    uint public immutable flaunchFee;
 
     /// The {FlaunchFeeExemption} contract
     FlaunchFeeExemption public immutable flaunchFeeExemption;
@@ -55,11 +69,19 @@ contract InitialPrice is IInitialPrice, Ownable {
     /**
      * Sets a flat Flaunching fee of 1 finney.
      *
-     * @param _sender The address flaunching, which may be exluded from flaunching fees
+     * @param _sender The address flaunching, which may be excluded from flaunching fees
      *
      * @return uint The fee taken from the user for Flaunching a token
      */
-    function getFlaunchingFee(address _sender, bytes calldata /* _initialPriceParams */) public view returns (uint) {
+    function getFlaunchingFee(address _sender, bytes calldata _initialPriceParams) public view returns (uint) {
+        // Decode our initial price parameters to give the USDC value requested
+        (InitialPriceParams memory params) = abi.decode(_initialPriceParams, (InitialPriceParams));
+
+        // If the fee is below our set threshold, then we want to exclude the fee
+        if (params.usdcMarketCap <= flaunchFeeThreshold) {
+            return 0;
+        }
+
         // Check if our `_sender` is fee excluded
         if (flaunchFeeExemption.feeExcluded(_sender)) {
             return 0;
@@ -107,6 +129,16 @@ contract InitialPrice is IInitialPrice, Ownable {
     function setSqrtPriceX96(InitialSqrtPriceX96 memory _sqrtPriceX96) public onlyOwner {
         _initialSqrtPriceX96 = _sqrtPriceX96;
         emit InitialSqrtPriceX96Updated(_sqrtPriceX96.unflipped, _sqrtPriceX96.flipped);
+    }
+
+    /**
+     * Allows the `flaunchFeeThreshold` to be updated.
+     *
+     * @param _flaunchFeeThreshold The new flaunch fee threshold
+     */
+    function setFlaunchFeeThreshold(uint _flaunchFeeThreshold) public onlyOwner {
+        flaunchFeeThreshold = _flaunchFeeThreshold;
+        emit FlaunchFeeThresholdUpdated(_flaunchFeeThreshold);
     }
 
     /**

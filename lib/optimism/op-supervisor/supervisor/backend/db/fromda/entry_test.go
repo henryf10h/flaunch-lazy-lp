@@ -11,9 +11,9 @@ import (
 )
 
 func FuzzRoundtripLinkEntry(f *testing.F) {
-	f.Fuzz(func(t *testing.T, aHash []byte, aNum uint64, aTimestamp uint64, bHash []byte, bNum uint64, bTimestamp uint64) {
+	f.Fuzz(func(t *testing.T, invalidated bool, revision uint64, aHash []byte, aNum uint64, aTimestamp uint64, bHash []byte, bNum uint64, bTimestamp uint64) {
 		x := LinkEntry{
-			derivedFrom: types.BlockSeal{
+			source: types.BlockSeal{
 				Hash:      common.BytesToHash(aHash),
 				Number:    aNum,
 				Timestamp: aTimestamp,
@@ -23,9 +23,11 @@ func FuzzRoundtripLinkEntry(f *testing.F) {
 				Number:    bNum,
 				Timestamp: bTimestamp,
 			},
+			revision:    types.Revision(revision &^ (1 << 63)), // only block-number revision values that can roundtrip
+			invalidated: invalidated,
 		}
 		entry := x.encode()
-		require.Equal(t, DerivedFromV0, entry.Type())
+		require.True(t, SourceV0 == entry.Type() || InvalidatedFromV0 == entry.Type())
 		var y LinkEntry
 		err := y.decode(entry)
 		require.NoError(t, err)

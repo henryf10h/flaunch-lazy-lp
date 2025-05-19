@@ -25,8 +25,9 @@ op-program-host:
 
 op-program-client:
 	env GO111MODULE=on GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -v -ldflags "$(PC_LDFLAGSSTRING)" -o ./bin/op-program-client ./client/cmd/main.go
+	env GO111MODULE=on GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -v -ldflags "$(PC_LDFLAGSSTRING)" -o ./bin/op-program-client-interop ./client/interopcmd/main.go
 
-op-program-client-mips: op-program-client-mips32 op-program-client-mips64
+op-program-client-mips: op-program-client-mips32 op-program-client-mips64 op-program-client-mips64-interop
 
 op-program-client-mips32:
 	env GO111MODULE=on GOOS=linux GOARCH=mips GOMIPS=softfloat go build -v -ldflags "$(PC_LDFLAGSSTRING)" -o ./bin/op-program-client.elf ./client/cmd/main.go
@@ -38,6 +39,11 @@ op-program-client-mips64:
 	# verify output with: readelf -h bin/op-program-client64.elf
 	# result is mips64, big endian, R3000
 
+op-program-client-mips64-interop:
+	env GO111MODULE=on GOOS=linux GOARCH=mips64 GOMIPS64=softfloat go build -v -ldflags "$(PC_LDFLAGSSTRING)" -o ./bin/op-program-client-interop.elf ./client/interopcmd/main.go
+	# verify output with: readelf -h bin/op-program-client-interop.elf
+	# result is mips64, big endian, R3000
+
 op-program-client-riscv:
 	env GO111MODULE=on GOOS=linux GOARCH=riscv64 go build -v -gcflags="all=-d=softfloat" -ldflags "$(PC_LDFLAGSSTRING)" -o ./bin/op-program-client-riscv.elf ./client/cmd/main.go
 
@@ -45,10 +51,10 @@ reproducible-prestate:
 	@docker build --output ./bin/ --progress plain -f Dockerfile.repro ../
 	@echo "Cannon Absolute prestate hash: "
 	@cat ./bin/prestate-proof.json | jq -r .pre
-	@echo "MT-Cannon Absolute prestate hash: "
-	@cat ./bin/prestate-proof-mt.json | jq -r .pre
 	@echo "Cannon64 Absolute prestate hash: "
 	@cat ./bin/prestate-proof-mt64.json | jq -r .pre
+	@echo "CannonInterop Absolute prestate hash: "
+	@cat ./bin/prestate-proof-interop.json | jq -r .pre
 .PHONY: reproducible-prestate
 
 verify-reproducibility:
@@ -62,12 +68,6 @@ clean:
 
 test:
 	go test -v ./...
-
-verify-sepolia: op-program-host op-program-client
-	env GO111MODULE=on go run ./verify/sepolia/cmd/sepolia.go --l1 $$SEPOLIA_L1URL --l1.beacon $$SEPOLIA_BEACON_URL --l2 $$SEPOLIA_L2URL --datadir /tmp/test-sepolia
-
-verify-devnet: op-program-host op-program-client
-	env GO111MODULE=on go run ./verify/devnet/cmd/devnet.go --l1 http://localhost:8545 --l1.beacon http://localhost:5052 --l2 http://localhost:9545 --datadir /tmp/test-devnet
 
 capture-mainnet-genesis: op-program-host op-program-client
 	rm -rf "$(COMPAT_DIR)/mainnet-genesis" "$(COMPAT_DIR)/mainnet-genesis.tar.bz"
@@ -105,6 +105,14 @@ verify-sepolia-fjord: op-program-host op-program-client
 
 verify-compat: verify-sepolia-delta verify-sepolia-ecotone verify-mainnet-genesis
 
+analyze-op-program-client: analyze-op-program-client-cannon-singlethreaded-32 analyze-op-program-client-cannon-multithreaded-64
+
+analyze-op-program-client-cannon-singlethreaded-32:
+	./scripts/run-static-analysis.sh cannon-singlethreaded-32 ./compatibility-test/baseline-cannon-singlethreaded-32.json
+
+analyze-op-program-client-cannon-multithreaded-64:
+	./scripts/run-static-analysis.sh cannon-multithreaded-64 ./compatibility-test/baseline-cannon-multithreaded-64.json
+
 .PHONY: \
 	op-program \
 	op-program-host \
@@ -116,12 +124,13 @@ verify-compat: verify-sepolia-delta verify-sepolia-ecotone verify-mainnet-genesi
 	clean \
 	test \
 	capture-goerli-verify \
-	verify-sepolia \
-	verify-devnet \
 	capture-mainnet-genesis \
 	capture-sepolia-delta \
 	capture-sepolia-ecotone \
 	capture-chain-test-data \
 	run-goerli-verify \
 	run-sepolia-verify \
-	run-compat
+	run-compat \
+	analyze-op-program-client \
+	analyze-op-program-client-cannon-singlethreaded-32 \
+	analyze-op-program-client-cannon-multithreaded-64

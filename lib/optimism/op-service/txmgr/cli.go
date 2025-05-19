@@ -27,17 +27,20 @@ const (
 	HDPathFlagName     = "hd-path"
 	PrivateKeyFlagName = "private-key"
 	// TxMgr Flags (new + legacy + some shared flags)
-	NumConfirmationsFlagName          = "num-confirmations"
-	SafeAbortNonceTooLowCountFlagName = "safe-abort-nonce-too-low-count"
-	FeeLimitMultiplierFlagName        = "fee-limit-multiplier"
-	FeeLimitThresholdFlagName         = "txmgr.fee-limit-threshold"
-	MinBaseFeeFlagName                = "txmgr.min-basefee"
-	MinTipCapFlagName                 = "txmgr.min-tip-cap"
-	ResubmissionTimeoutFlagName       = "resubmission-timeout"
-	NetworkTimeoutFlagName            = "network-timeout"
-	TxSendTimeoutFlagName             = "txmgr.send-timeout"
-	TxNotInMempoolTimeoutFlagName     = "txmgr.not-in-mempool-timeout"
-	ReceiptQueryIntervalFlagName      = "txmgr.receipt-query-interval"
+	NumConfirmationsFlagName           = "num-confirmations"
+	SafeAbortNonceTooLowCountFlagName  = "safe-abort-nonce-too-low-count"
+	FeeLimitMultiplierFlagName         = "fee-limit-multiplier"
+	FeeLimitThresholdFlagName          = "txmgr.fee-limit-threshold"
+	MinBaseFeeFlagName                 = "txmgr.min-basefee"
+	MaxBaseFeeFlagName                 = "txmgr.max-basefee"
+	MinTipCapFlagName                  = "txmgr.min-tip-cap"
+	MaxTipCapFlagName                  = "txmgr.max-tip-cap"
+	ResubmissionTimeoutFlagName        = "resubmission-timeout"
+	NetworkTimeoutFlagName             = "network-timeout"
+	TxSendTimeoutFlagName              = "txmgr.send-timeout"
+	TxNotInMempoolTimeoutFlagName      = "txmgr.not-in-mempool-timeout"
+	ReceiptQueryIntervalFlagName       = "txmgr.receipt-query-interval"
+	AlreadyPublishedCustomErrsFlagName = "txmgr.already-published-custom-errs"
 )
 
 var (
@@ -79,7 +82,7 @@ var (
 		MinBaseFeeGwei:            1.0,
 		ResubmissionTimeout:       48 * time.Second,
 		NetworkTimeout:            10 * time.Second,
-		TxSendTimeout:             10 * time.Minute,
+		TxSendTimeout:             0, // Try sending txs indefinitely, to preserve tx ordering for Holocene
 		TxNotInMempoolTimeout:     2 * time.Minute,
 		ReceiptQueryInterval:      12 * time.Second,
 	}
@@ -156,10 +159,20 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			EnvVars: prefixEnvVars("TXMGR_MIN_TIP_CAP"),
 		},
 		&cli.Float64Flag{
+			Name:    MaxTipCapFlagName,
+			Usage:   "Enforces a maximum tip cap (in GWei) to use when determining tx fees, `TxMgr` returns an error when exceeded. Disabled by default.",
+			EnvVars: prefixEnvVars("TXMGR_MAX_TIP_CAP"),
+		},
+		&cli.Float64Flag{
 			Name:    MinBaseFeeFlagName,
 			Usage:   "Enforces a minimum base fee (in GWei) to assume when determining tx fees. 1 GWei by default.",
 			Value:   defaults.MinBaseFeeGwei,
 			EnvVars: prefixEnvVars("TXMGR_MIN_BASEFEE"),
+		},
+		&cli.Float64Flag{
+			Name:    MaxBaseFeeFlagName,
+			Usage:   "Enforces a maximum base fee (in GWei) to assume when determining tx fees, `TxMgr` returns an error when exceeded. Disabled by default.",
+			EnvVars: prefixEnvVars("TXMGR_MAX_BASEFEE"),
 		},
 		&cli.DurationFlag{
 			Name:    ResubmissionTimeoutFlagName,
@@ -191,28 +204,36 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			Value:   defaults.ReceiptQueryInterval,
 			EnvVars: prefixEnvVars("TXMGR_RECEIPT_QUERY_INTERVAL"),
 		},
-	}, opsigner.CLIFlags(envPrefix)...)
+		&cli.StringSliceFlag{
+			Name:    AlreadyPublishedCustomErrsFlagName,
+			Usage:   "List of custom RPC error messages that indicate that a transaction has already been published.",
+			EnvVars: prefixEnvVars("TXMGR_ALREADY_PUBLISHED_CUSTOM_ERRS"),
+		},
+	}, opsigner.CLIFlags(envPrefix, "")...)
 }
 
 type CLIConfig struct {
-	L1RPCURL                  string
-	Mnemonic                  string
-	HDPath                    string
-	SequencerHDPath           string
-	L2OutputHDPath            string
-	PrivateKey                string
-	SignerCLIConfig           opsigner.CLIConfig
-	NumConfirmations          uint64
-	SafeAbortNonceTooLowCount uint64
-	FeeLimitMultiplier        uint64
-	FeeLimitThresholdGwei     float64
-	MinBaseFeeGwei            float64
-	MinTipCapGwei             float64
-	ResubmissionTimeout       time.Duration
-	ReceiptQueryInterval      time.Duration
-	NetworkTimeout            time.Duration
-	TxSendTimeout             time.Duration
-	TxNotInMempoolTimeout     time.Duration
+	L1RPCURL                   string
+	Mnemonic                   string
+	HDPath                     string
+	SequencerHDPath            string
+	L2OutputHDPath             string
+	PrivateKey                 string
+	SignerCLIConfig            opsigner.CLIConfig
+	NumConfirmations           uint64
+	SafeAbortNonceTooLowCount  uint64
+	FeeLimitMultiplier         uint64
+	FeeLimitThresholdGwei      float64
+	MinBaseFeeGwei             float64
+	MinTipCapGwei              float64
+	MaxBaseFeeGwei             float64
+	MaxTipCapGwei              float64
+	ResubmissionTimeout        time.Duration
+	ReceiptQueryInterval       time.Duration
+	NetworkTimeout             time.Duration
+	TxSendTimeout              time.Duration
+	TxNotInMempoolTimeout      time.Duration
+	AlreadyPublishedCustomErrs []string
 }
 
 func NewCLIConfig(l1RPCURL string, defaults DefaultFlagValues) CLIConfig {
@@ -270,24 +291,27 @@ func (m CLIConfig) Check() error {
 
 func ReadCLIConfig(ctx *cli.Context) CLIConfig {
 	return CLIConfig{
-		L1RPCURL:                  ctx.String(L1RPCFlagName),
-		Mnemonic:                  ctx.String(MnemonicFlagName),
-		HDPath:                    ctx.String(HDPathFlagName),
-		SequencerHDPath:           ctx.String(SequencerHDPathFlag.Name),
-		L2OutputHDPath:            ctx.String(L2OutputHDPathFlag.Name),
-		PrivateKey:                ctx.String(PrivateKeyFlagName),
-		SignerCLIConfig:           opsigner.ReadCLIConfig(ctx),
-		NumConfirmations:          ctx.Uint64(NumConfirmationsFlagName),
-		SafeAbortNonceTooLowCount: ctx.Uint64(SafeAbortNonceTooLowCountFlagName),
-		FeeLimitMultiplier:        ctx.Uint64(FeeLimitMultiplierFlagName),
-		FeeLimitThresholdGwei:     ctx.Float64(FeeLimitThresholdFlagName),
-		MinBaseFeeGwei:            ctx.Float64(MinBaseFeeFlagName),
-		MinTipCapGwei:             ctx.Float64(MinTipCapFlagName),
-		ResubmissionTimeout:       ctx.Duration(ResubmissionTimeoutFlagName),
-		ReceiptQueryInterval:      ctx.Duration(ReceiptQueryIntervalFlagName),
-		NetworkTimeout:            ctx.Duration(NetworkTimeoutFlagName),
-		TxSendTimeout:             ctx.Duration(TxSendTimeoutFlagName),
-		TxNotInMempoolTimeout:     ctx.Duration(TxNotInMempoolTimeoutFlagName),
+		L1RPCURL:                   ctx.String(L1RPCFlagName),
+		Mnemonic:                   ctx.String(MnemonicFlagName),
+		HDPath:                     ctx.String(HDPathFlagName),
+		SequencerHDPath:            ctx.String(SequencerHDPathFlag.Name),
+		L2OutputHDPath:             ctx.String(L2OutputHDPathFlag.Name),
+		PrivateKey:                 ctx.String(PrivateKeyFlagName),
+		SignerCLIConfig:            opsigner.ReadCLIConfig(ctx),
+		NumConfirmations:           ctx.Uint64(NumConfirmationsFlagName),
+		SafeAbortNonceTooLowCount:  ctx.Uint64(SafeAbortNonceTooLowCountFlagName),
+		FeeLimitMultiplier:         ctx.Uint64(FeeLimitMultiplierFlagName),
+		FeeLimitThresholdGwei:      ctx.Float64(FeeLimitThresholdFlagName),
+		MinBaseFeeGwei:             ctx.Float64(MinBaseFeeFlagName),
+		MaxBaseFeeGwei:             ctx.Float64(MaxBaseFeeFlagName),
+		MinTipCapGwei:              ctx.Float64(MinTipCapFlagName),
+		MaxTipCapGwei:              ctx.Float64(MaxTipCapFlagName),
+		ResubmissionTimeout:        ctx.Duration(ResubmissionTimeoutFlagName),
+		ReceiptQueryInterval:       ctx.Duration(ReceiptQueryIntervalFlagName),
+		NetworkTimeout:             ctx.Duration(NetworkTimeoutFlagName),
+		TxSendTimeout:              ctx.Duration(TxSendTimeoutFlagName),
+		TxNotInMempoolTimeout:      ctx.Duration(TxNotInMempoolTimeoutFlagName),
+		AlreadyPublishedCustomErrs: ctx.StringSlice(AlreadyPublishedCustomErrsFlagName),
 	}
 }
 
@@ -338,24 +362,45 @@ func NewConfig(cfg CLIConfig, l log.Logger) (*Config, error) {
 		return nil, fmt.Errorf("invalid min tip cap: %w", err)
 	}
 
+	var (
+		maxBaseFee, maxTipCap *big.Int
+	)
+	if cfg.MaxBaseFeeGwei > 0 {
+		maxBaseFee, err = eth.GweiToWei(cfg.MaxBaseFeeGwei)
+		if err != nil {
+			return nil, fmt.Errorf("invalid max base fee: %w", err)
+		}
+	}
+
+	if cfg.MaxTipCapGwei > 0 {
+		maxTipCap, err = eth.GweiToWei(cfg.MaxTipCapGwei)
+		if err != nil {
+			return nil, fmt.Errorf("invalid max tip cap: %w", err)
+		}
+	}
+
 	res := Config{
-		Backend:                   l1,
-		ChainID:                   chainID,
-		TxSendTimeout:             cfg.TxSendTimeout,
-		TxNotInMempoolTimeout:     cfg.TxNotInMempoolTimeout,
-		NetworkTimeout:            cfg.NetworkTimeout,
-		ReceiptQueryInterval:      cfg.ReceiptQueryInterval,
-		NumConfirmations:          cfg.NumConfirmations,
-		SafeAbortNonceTooLowCount: cfg.SafeAbortNonceTooLowCount,
-		Signer:                    signerFactory(chainID),
-		From:                      from,
+		Backend: l1,
+		ChainID: chainID,
+		Signer:  signerFactory(chainID),
+		From:    from,
+
+		TxSendTimeout:              cfg.TxSendTimeout,
+		TxNotInMempoolTimeout:      cfg.TxNotInMempoolTimeout,
+		NetworkTimeout:             cfg.NetworkTimeout,
+		ReceiptQueryInterval:       cfg.ReceiptQueryInterval,
+		NumConfirmations:           cfg.NumConfirmations,
+		SafeAbortNonceTooLowCount:  cfg.SafeAbortNonceTooLowCount,
+		AlreadyPublishedCustomErrs: cfg.AlreadyPublishedCustomErrs,
 	}
 
 	res.ResubmissionTimeout.Store(int64(cfg.ResubmissionTimeout))
 	res.FeeLimitThreshold.Store(feeLimitThreshold)
 	res.FeeLimitMultiplier.Store(cfg.FeeLimitMultiplier)
 	res.MinBaseFee.Store(minBaseFee)
+	res.MaxBaseFee.Store(maxBaseFee)
 	res.MinTipCap.Store(minTipCap)
+	res.MaxTipCap.Store(maxTipCap)
 	res.MinBlobTxFee.Store(defaultMinBlobTxFee)
 
 	return &res, nil
@@ -380,9 +425,13 @@ type Config struct {
 
 	// Minimum base fee (in Wei) to assume when determining tx fees.
 	MinBaseFee atomic.Pointer[big.Int]
+	// Maximum base fee (in Wei) to assume when determining tx fees.
+	MaxBaseFee atomic.Pointer[big.Int]
 
 	// Minimum tip cap (in Wei) to enforce when determining tx fees.
 	MinTipCap atomic.Pointer[big.Int]
+	// Maximum tip cap (in Wei) to enforce when determining tx fees.
+	MaxTipCap atomic.Pointer[big.Int]
 
 	MinBlobTxFee atomic.Pointer[big.Int]
 
@@ -422,6 +471,10 @@ type Config struct {
 	// GasPriceEstimatorFn is used to estimate the gas price for a transaction.
 	// If nil, DefaultGasPriceEstimatorFn is used.
 	GasPriceEstimatorFn GasPriceEstimatorFn
+
+	// List of custom RPC error messages that indicate that a transaction has
+	// already been published.
+	AlreadyPublishedCustomErrs []string
 }
 
 func (m *Config) Check() error {

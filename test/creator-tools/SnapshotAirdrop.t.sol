@@ -694,6 +694,7 @@ contract SnapshotAirdropTest is FlaunchTest {
             symbol: "TEST",
             tokenUri: 'https://token.gg/',
             initialTokenFairLaunch: 0.25e27,
+            fairLaunchDuration: 30 minutes,
             premineAmount: tokensToPremine,
             creator: creator,
             creatorFeeAllocation: 0,

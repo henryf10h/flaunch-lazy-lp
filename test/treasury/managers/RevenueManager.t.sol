@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {PoolId, PoolIdLibrary} from '@uniswap/v4-core/src/types/PoolId.sol';
+import {PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
 
 import {Flaunch} from '@flaunch/Flaunch.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
-import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 import {RevenueManager} from '@flaunch/treasury/managers/RevenueManager.sol';
-import {SingleTokenManager} from '@flaunch/treasury/managers/SingleTokenManager.sol';
 import {TreasuryManagerFactory} from '@flaunch/treasury/managers/TreasuryManagerFactory.sol';
 import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
 
@@ -25,7 +23,7 @@ contract RevenueManagerTest is FlaunchTest {
 
     /// Define some useful testing addresses
     address payable internal owner = payable(address(0x123));
-    address payable internal nonOwner = payable(address(0x456));
+    address payable internal creator = payable(address(0x456));
     address payable internal protocolRecipient = payable(address(0x789));
 
     /// Set a default, valid protocol fee for testing
@@ -38,34 +36,34 @@ contract RevenueManagerTest is FlaunchTest {
         // Deploy our platform
         _deployPlatform();
 
-        // Set up our {TreasuryManagerFactory} and approve our implementation
-        vm.startPrank(owner);
-        factory = new TreasuryManagerFactory(owner);
-        factory.grantRole(ProtocolRoles.FLAUNCH, address(flaunch));
-        managerImplementation = address(new RevenueManager(address(factory)));
-        factory.approveManager(managerImplementation);
+        managerImplementation = address(new RevenueManager(address(treasuryManagerFactory)));
+        treasuryManagerFactory.approveManager(managerImplementation);
 
-        // Get the tokenId from the memecoin address
-        tokenId = _createERC721(owner);
-
-        // Deploy our {RevenueManager} implementation and transfer our tokenId
-        address payable implementation = factory.deployManager(managerImplementation);
-        flaunch.approve(implementation, tokenId);
+        // Deploy our {RevenueManager} implementation and initialize
+        address payable implementation = treasuryManagerFactory.deployAndInitializeManager({
+            _managerImplementation: managerImplementation,
+            _owner: owner,
+            _data: abi.encode(
+                RevenueManager.InitializeParams(protocolRecipient, VALID_PROTOCOL_FEE)
+            )
+        });
 
         // Set our revenue manager
         revenueManager = RevenueManager(implementation);
 
-        // Initialize a testing token
-        revenueManager.initialize({
+        // Create a token and deposit it into our manager
+        tokenId = _createERC721(address(this));
+        flaunch.approve(address(revenueManager), tokenId);
+
+        revenueManager.deposit({
             _flaunchToken: ITreasuryManager.FlaunchToken({
                 flaunch: flaunch,
                 tokenId: tokenId
             }),
-            _owner: owner,
-            _data: abi.encode(
-                RevenueManager.InitializeParams(nonOwner, protocolRecipient, VALID_PROTOCOL_FEE)
-            )
+            _creator: creator,
+            _data: abi.encode('')
         });
+
         vm.stopPrank();
     }
 
@@ -85,29 +83,40 @@ contract RevenueManagerTest is FlaunchTest {
 
         // Define our initialization parameters
         RevenueManager.InitializeParams memory params = RevenueManager.InitializeParams(
-            _creator, _protocolRecipient, _protocolFee
+            _protocolRecipient, _protocolFee
         );
 
         vm.expectEmit();
-        emit TreasuryManager.TreasuryEscrowed(address(flaunch), newTokenId, address(this), address(this));
-        emit RevenueManager.ManagerInitialized(address(flaunch), newTokenId, params);
+        emit RevenueManager.ManagerInitialized(address(this), params);
 
         revenueManager.initialize({
-            _flaunchToken: ITreasuryManager.FlaunchToken({
-                flaunch: flaunch,
-                tokenId: newTokenId
-            }),
             _owner: address(this),
             _data: abi.encode(params)
         });
 
-        // Confirm that initial values are set
-        (Flaunch _flaunch, uint _tokenId) = revenueManager.flaunchToken();
-        assertEq(address(_flaunch), address(flaunch));
-        assertEq(_tokenId, newTokenId);
+        assertEq(revenueManager.nextInternalId(), 1);
 
+        vm.expectEmit();
+        emit TreasuryManager.TreasuryEscrowed(address(flaunch), newTokenId, _creator, address(this));
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: newTokenId
+            }),
+            _creator: _creator,
+            _data: abi.encode('')
+        });
+
+        // Confirm that the {RevenueManager} owns the ERC721
+        assertEq(flaunch.ownerOf(newTokenId), address(revenueManager));
+
+        // We need to ensure that our first internalId is not zero
+        assertEq(revenueManager.flaunchTokenInternalIds(address(flaunch), newTokenId), 1);
+        assertEq(revenueManager.nextInternalId(), 2);
+
+        // Confirm that initial values are set
         assertEq(revenueManager.managerOwner(), address(this));
-        assertEq(revenueManager.creator(), _creator);
+        assertEq(revenueManager.creator(address(flaunch), newTokenId), _creator);
         assertEq(revenueManager.protocolRecipient(), _protocolRecipient);
         assertEq(revenueManager.protocolFee(), _protocolFee);
     }
@@ -117,53 +126,173 @@ contract RevenueManagerTest is FlaunchTest {
      * to transfer it to the Manager. For this reason, trying to initialize
      * with the unowned token should revert.
      */
-    function test_CannotInitializeWithUnownedToken() public freshManager {
+    function test_CannotDepositUnownedToken() public freshManager {
+        vm.startPrank(address(1));
+
         vm.expectRevert();
-        revenueManager.initialize({
+        revenueManager.deposit({
             _flaunchToken: ITreasuryManager.FlaunchToken({
                 flaunch: flaunch,
-                tokenId: 123
+                tokenId: 1
             }),
-            _owner: owner,
-            _data: abi.encode(
-                RevenueManager.InitializeParams(nonOwner, protocolRecipient, VALID_PROTOCOL_FEE)
-            )
+            _creator: creator,
+            _data: abi.encode('')
         });
+
+        vm.stopPrank();
     }
 
     /**
-     * If a token is already registered to the Manager then it cannot receive
-     * another as the logic does not work for more than one tokenId.
+     * The manager should be able to handle multiple tokens from multiple creators.
      */
-    function test_CannotInitializeIfTokenIdAlreadySet() public {
-        // Flaunch another memecoin to mint a tokenId
-        uint newTokenId = _createERC721(address(this));
+    function test_CanInitializeWithMultipleTokens() public {
+        // Flaunch multiple tokens from multiple creators
+        uint tokenId1 = _createERC721(address(this));
+        uint tokenId2 = _createERC721(address(this));
+        uint tokenId3 = _createERC721(address(this));
+        uint tokenId4 = _createERC721(address(this));
 
-        // Deploy our {RevenueManager} implementation and transfer our tokenId
-        flaunch.approve(address(revenueManager), newTokenId);
+        flaunch.approve(address(revenueManager), tokenId1);
+        flaunch.approve(address(revenueManager), tokenId2);
+        flaunch.approve(address(revenueManager), tokenId3);
+        flaunch.approve(address(revenueManager), tokenId4);
 
-        vm.expectRevert(abi.encodeWithSelector(
-            SingleTokenManager.TokenAlreadySet.selector,
-            ITreasuryManager.FlaunchToken(flaunch, tokenId))
-        );
-        revenueManager.initialize({
-            _flaunchToken: ITreasuryManager.FlaunchToken({
-                flaunch: flaunch,
-                tokenId: newTokenId
-            }),
-            _owner: address(this),
-            _data: abi.encode(
-                RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, VALID_PROTOCOL_FEE)
-            )
+        vm.stopPrank();
+
+        // Deposit each of our tokens to a range of user EOAs
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken(flaunch, tokenId1),
+            _creator: address(1),
+            _data: abi.encode('')
         });
+
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken(flaunch, tokenId2),
+            _creator: address(1),
+            _data: abi.encode('')
+        });
+
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken(flaunch, tokenId3),
+            _creator: address(2),
+            _data: abi.encode('')
+        });
+
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken(flaunch, tokenId4),
+            _creator: address(3),
+            _data: abi.encode('')
+        });
+
+        // Confirm our creator mappings
+        assertEq(revenueManager.creator(address(flaunch), tokenId1), address(1));
+        assertEq(revenueManager.creator(address(flaunch), tokenId2), address(1));
+        assertEq(revenueManager.creator(address(flaunch), tokenId3), address(2));
+        assertEq(revenueManager.creator(address(flaunch), tokenId4), address(3));
+
+        // Allocate fees (3 eth total)
+        _allocateFees(address(flaunch), tokenId1, 1 ether);
+        _allocateFees(address(flaunch), tokenId2, 1 ether);
+        _allocateFees(address(flaunch), tokenId3, 1 ether);
+
+        // Before any claim, we have no available claim as we have not yet withdrawn
+        assertEq(revenueManager.balances(revenueManager.protocolRecipient()), revenueManager.getProtocolFee(3 ether));
+        assertEq(revenueManager.protocolTotalClaimed(), 0);
+
+        // Make a claim, calling from the protocol address
+        vm.prank(revenueManager.protocolRecipient());
+        revenueManager.claim();
+
+        // We should now have an increased amount of ETH and have 5% of claims as protocol
+        assertEq(revenueManager.balances(revenueManager.protocolRecipient()), 0);
+        assertEq(revenueManager.protocolTotalClaimed(), 0.15 ether);
+
+        // Claim as creator 1 - pool 1
+        vm.startPrank(address(1));
+        ITreasuryManager.FlaunchToken[] memory flaunchTokens = new ITreasuryManager.FlaunchToken[](1);
+        flaunchTokens[0] = ITreasuryManager.FlaunchToken(flaunch, tokenId1);
+
+        revenueManager.claim(flaunchTokens);
+
+        assertEq(revenueManager.creatorTotalClaimed(address(1)), 0.95 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId1), 0.95 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId2), 0);
+        vm.stopPrank();
+
+        // Allocate more fees
+        _allocateFees(address(flaunch), tokenId3, 1 ether);
+
+        // Confirm the creators expected balance from an external user call
+        assertEq(revenueManager.balances(address(2)), 1.9 ether);
+
+        // Claim as creator 2
+        vm.startPrank(address(2));
+        flaunchTokens[0] = ITreasuryManager.FlaunchToken(flaunch, tokenId3);
+
+        // Confirm the creators expected balance and make the call without specification
+        assertEq(revenueManager.balances(address(2)), 1.9 ether);
+
+        revenueManager.claim();
+
+        assertEq(revenueManager.creatorTotalClaimed(address(2)), 1.9 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId3), 1.9 ether);
+
+        // The protocol now has fees from 1 ether ready to claim, and 3 ether already claimed
+        assertEq(revenueManager.balances(revenueManager.protocolRecipient()), revenueManager.getProtocolFee(1 ether));
+        assertEq(revenueManager.protocolTotalClaimed(), revenueManager.getProtocolFee(3 ether));
+        vm.stopPrank();
+
+        // Claim as creator 1 - pool 1 & pool 2
+        vm.startPrank(address(1));
+        flaunchTokens = new ITreasuryManager.FlaunchToken[](2);
+        flaunchTokens[0] = ITreasuryManager.FlaunchToken(flaunch, tokenId1);
+        flaunchTokens[1] = ITreasuryManager.FlaunchToken(flaunch, tokenId2);
+
+        revenueManager.claim(flaunchTokens);
+
+        assertEq(revenueManager.creatorTotalClaimed(address(1)), 1.9 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId1), 0.95 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId2), 0.95 ether);
+        vm.stopPrank();
+
+        // Claim as protocol
+        vm.prank(revenueManager.protocolRecipient());
+        revenueManager.claim();
+
+        assertEq(revenueManager.balances(revenueManager.protocolRecipient()), 0);
+        assertEq(revenueManager.protocolTotalClaimed(), revenueManager.getProtocolFee(4 ether));
+
+        // Make an empty protocol claim
+        vm.prank(revenueManager.protocolRecipient());
+        revenueManager.claim();
+
+        assertEq(revenueManager.balances(revenueManager.protocolRecipient()), 0);
+        assertEq(revenueManager.protocolTotalClaimed(), revenueManager.getProtocolFee(4 ether));
+
+        // Make an empty user claim
+        vm.startPrank(address(1));
+        flaunchTokens = new ITreasuryManager.FlaunchToken[](2);
+        flaunchTokens[0] = ITreasuryManager.FlaunchToken(flaunch, tokenId1);
+        flaunchTokens[1] = ITreasuryManager.FlaunchToken(flaunch, tokenId2);
+
+        revenueManager.claim(flaunchTokens);
+
+        assertEq(revenueManager.creatorTotalClaimed(address(1)), 1.9 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId1), 0.95 ether);
+        assertEq(revenueManager.tokenTotalClaimed(address(flaunch), tokenId2), 0.95 ether);
+        vm.stopPrank();
+
+        // Try and make a claim without being either an owner or creator
+        uint unknownClaim = revenueManager.claim();
+        assertEq(unknownClaim, 0);
+        /**/
     }
 
     /**
      * We don't allow the creator to be a zero address, so we need to ensure
      * that a call with a zero address will revert.
      */
-    function test_CannotInitializeWithInvalidCreator(address payable _protocolRecipient, uint _protocolFee) public freshManager {
-        vm.assume(_protocolFee <= 100_00);
+    function test_CannotDepositWithInvalidCreator() public {
 
         // Flaunch another memecoin to mint a tokenId
         uint newTokenId = _createERC721(address(this));
@@ -172,15 +301,13 @@ contract RevenueManagerTest is FlaunchTest {
         flaunch.approve(address(revenueManager), newTokenId);
 
         vm.expectRevert(RevenueManager.InvalidCreatorAddress.selector);
-        revenueManager.initialize({
+        revenueManager.deposit({
             _flaunchToken: ITreasuryManager.FlaunchToken({
                 flaunch: flaunch,
                 tokenId: newTokenId
             }),
-            _owner: address(this),
-            _data: abi.encode(
-                RevenueManager.InitializeParams(payable(address(0)), _protocolRecipient, _protocolFee)
-            )
+            _creator: address(0),
+            _data: abi.encode('')
         });
     }
 
@@ -200,129 +327,11 @@ contract RevenueManagerTest is FlaunchTest {
 
         vm.expectRevert(RevenueManager.InvalidProtocolFee.selector);
         revenueManager.initialize({
-            _flaunchToken: ITreasuryManager.FlaunchToken({
-                flaunch: flaunch,
-                tokenId: newTokenId
-            }),
             _owner: address(this),
             _data: abi.encode(
-                RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, _protocolFee)
+                RevenueManager.InitializeParams(protocolRecipient, _protocolFee)
             )
         });
-    }
-
-    /**
-     * A claim should be able to split revenue between an end-owner creator and
-     * an optional protocol. This test needs to ensure this optional split as
-     * well as varied protocol fee amounts.
-     */
-    function test_CanClaim() public {
-        /**
-         * Protocol fee:       0%
-         * Protocol recipient: true
-         */
-
-         _assertClaimAmounts({
-            protocolFee: 0,
-            protocolRecipientSet: true,
-            claimAmount: 1 ether,
-            creatorAmount: 1 ether,
-            protocolAmount: 0
-        });
-
-        /**
-         * Protocol fee:       100%
-         * Protocol recipient: true
-         */
-
-         _assertClaimAmounts({
-            protocolFee: 100_00,
-            protocolRecipientSet: true,
-            claimAmount: 1 ether,
-            creatorAmount: 0,
-            protocolAmount: 1 ether
-        });
-
-        /**
-         * Protocol fee:       50%
-         * Protocol recipient: true
-         */
-
-         _assertClaimAmounts({
-            protocolFee: 50_00,
-            protocolRecipientSet: true,
-            claimAmount: 1 ether,
-            creatorAmount: 0.5 ether,
-            protocolAmount: 0.5 ether
-        });
-
-        /**
-         * Protocol fee:       50%
-         * Protocol recipient: false
-         */
-
-         _assertClaimAmounts({
-            protocolFee: 50_00,
-            protocolRecipientSet: false,
-            claimAmount: 1 ether,
-            creatorAmount: 1 ether,
-            protocolAmount: 0
-        });
-
-        /**
-         * Protocol fee:       50%
-         * Protocol recipient: true
-         *
-         * @dev If the value is indivisible, then the creator benefits.
-         */
-
-         _assertClaimAmounts({
-            protocolFee: 50_00,
-            protocolRecipientSet: true,
-            claimAmount: 3,
-            creatorAmount: 2,
-            protocolAmount: 1
-        });
-    }
-
-    /**
-     * When revenue is claimed, we want to record running, onchain totals for the claim
-     * amounts of both the end-owner creator and the protocol. This test needs to ensure that
-     * both of these values are tracked correctly.
-     */
-    function test_CanTrackClaimedFees() public {
-        // Set a protocol recipient and set the fee to 25% for the protocol
-        vm.startPrank(owner);
-        revenueManager.setProtocolFee(25_00);
-        revenueManager.setProtocolRecipient(protocolRecipient);
-        vm.stopPrank();
-
-        _assertClaimTotals(1 ether, 0.75 ether, 0.25 ether);
-        _assertClaimTotals(0.4 ether, 1.05 ether, 0.35 ether);
-        _assertClaimTotals(0.2 ether, 1.2 ether, 0.4 ether);
-
-        // Increase the protocol fee
-        vm.prank(owner);
-        revenueManager.setProtocolFee(100_00);
-
-        _assertClaimTotals(1 ether, 1.2 ether, 1.4 ether);
-
-        // Remove the protocol recipient
-        vm.prank(owner);
-        revenueManager.setProtocolRecipient(payable(address(0)));
-
-        _assertClaimTotals(0.55 ether, 1.75 ether, 1.4 ether);
-    }
-
-    /**
-     * Claim calls should be able to be made, even if there is nothing to claim.
-     * This test needs to ensure that the call doesn't revert, but instead just
-     * returns zero values.
-     */
-    function test_CanClaimZeroFees() public {
-        (uint creatorAmount, uint protocolAmount) = revenueManager.claim();
-        assertEq(creatorAmount, 0);
-        assertEq(protocolAmount, 0);
     }
 
     /**
@@ -365,57 +374,6 @@ contract RevenueManagerTest is FlaunchTest {
     }
 
     /**
-     * The `owner` should be able to set the protocol fee. This value must
-     * fall within a valid value range.
-     */
-    function test_CanSetProtocolFee(uint _protocolFee) public {
-        // Ensure the protocol fee is within a valid range
-        vm.assume(_protocolFee <= 100_00);
-
-        vm.expectEmit();
-        emit RevenueManager.ProtocolFeeUpdated(_protocolFee);
-
-        // Set the new protocol fee
-        vm.prank(owner);
-        revenueManager.setProtocolFee(_protocolFee);
-
-        // Confirm that the new fee is set
-        assertEq(revenueManager.protocolFee(), _protocolFee);
-    }
-
-    /**
-     * If a protocol fee over 100% is set, then the call should revert.
-     */
-    function test_CannotSetInvalidProtocolFee(uint _protocolFee) public {
-        // Ensure that the protocol fee is invalid
-        vm.assume(_protocolFee > 100_00);
-
-        // Set the new protocol fee
-        vm.prank(owner);
-        vm.expectRevert(RevenueManager.InvalidProtocolFee.selector);
-        revenueManager.setProtocolFee(_protocolFee);
-    }
-
-    /**
-     * The `owner` of the {RevenueManager} is defined during the `initialize`
-     * call, and not the actual address that calls it. For this reason we need
-     * to ensure that this test cannot set the protocol owner (as it wasn't
-     * defined during the call) and any other address that is not the defined
-     * `owner`.
-     */
-    function test_CannotSetProtocolFeeIfNotOwner(address _caller) public {
-        // Ensure that the caller is not the owner
-        vm.assume(_caller != owner);
-
-        vm.startPrank(_caller);
-
-        vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
-        revenueManager.setProtocolRecipient(protocolRecipient);
-
-        vm.stopPrank();
-    }
-
-    /**
      * The `owner` should be able to set the creator. This cannot be a zero address.
      */
     function test_CanSetCreator(address payable _creator) public {
@@ -423,14 +381,20 @@ contract RevenueManagerTest is FlaunchTest {
         vm.assume(_creator != address(0));
 
         vm.expectEmit();
-        emit RevenueManager.CreatorUpdated(_creator);
+        emit RevenueManager.CreatorUpdated(address(flaunch), tokenId, _creator);
 
         // Set the new creator
         vm.prank(owner);
-        revenueManager.setCreator(_creator);
+        revenueManager.setCreator({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId
+            }),
+            _creator: _creator
+        });
 
         // Confirm that the new creator is set
-        assertEq(revenueManager.creator(), _creator);
+        assertEq(revenueManager.creator(address(flaunch), tokenId), _creator);
     }
 
     /**
@@ -440,7 +404,13 @@ contract RevenueManagerTest is FlaunchTest {
         // Set the new creator
         vm.prank(owner);
         vm.expectRevert(RevenueManager.InvalidCreatorAddress.selector);
-        revenueManager.setCreator(payable(address(0)));
+        revenueManager.setCreator({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId
+            }),
+            _creator: payable(address(0))
+        });
     }
 
     /**
@@ -457,7 +427,13 @@ contract RevenueManagerTest is FlaunchTest {
         vm.startPrank(_caller);
 
         vm.expectRevert(TreasuryManager.NotManagerOwner.selector);
-        revenueManager.setCreator(_caller);
+        revenueManager.setCreator({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId
+            }),
+            _creator: _caller
+        });
 
         vm.stopPrank();
     }
@@ -524,33 +500,66 @@ contract RevenueManagerTest is FlaunchTest {
         vm.stopPrank();
     }
 
-    /**
-     * If we rescue an ERC721 we need to ensure that another token cannot be added to take it's
-     * place as this could result in corrupted data. This is true even if the same token tries to
-     * be added back in.
-     */
-    function test_CannotAddNewERC721AfterRescue() public {
-        vm.prank(owner);
-        revenueManager.rescue(
-            ITreasuryManager.FlaunchToken(flaunch, tokenId),
-            address(this)
-        );
+    function test_CanGetAllCreatorTokens() public {
+        address user1 = address(420);
+        address user2 = address(421);
+        address user3 = address(422);
 
-        flaunch.approve(address(revenueManager), tokenId);
-        vm.expectRevert(abi.encodeWithSelector(
-            SingleTokenManager.TokenAlreadySet.selector,
-            ITreasuryManager.FlaunchToken(flaunch, tokenId)
-        ));
-        revenueManager.initialize({
+        // Create a token and deposit it into our manager
+        uint tokenId1 = _createERC721(user1);
+        uint tokenId2 = _createERC721(user2);
+        uint tokenId3 = _createERC721(user2);
+
+        vm.startPrank(user1);
+        flaunch.approve(address(revenueManager), tokenId1);
+
+        revenueManager.deposit({
             _flaunchToken: ITreasuryManager.FlaunchToken({
                 flaunch: flaunch,
-                tokenId: tokenId
+                tokenId: tokenId1
             }),
-            _owner: address(this),
-            _data: abi.encode(
-                RevenueManager.InitializeParams(payable(address(this)), protocolRecipient, VALID_PROTOCOL_FEE)
-            )
+            _creator: user1,
+            _data: abi.encode('')
         });
+        vm.stopPrank();
+
+        vm.startPrank(user2);
+        flaunch.approve(address(revenueManager), tokenId2);
+        flaunch.approve(address(revenueManager), tokenId3);
+
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId2
+            }),
+            _creator: user1,
+            _data: abi.encode('')
+        });
+
+        revenueManager.deposit({
+            _flaunchToken: ITreasuryManager.FlaunchToken({
+                flaunch: flaunch,
+                tokenId: tokenId3
+            }),
+            _creator: user2,
+            _data: abi.encode('')
+        });
+        vm.stopPrank();
+
+        ITreasuryManager.FlaunchToken[] memory user1Tokens = revenueManager.tokens(user1);
+        ITreasuryManager.FlaunchToken[] memory user2Tokens = revenueManager.tokens(user2);
+        ITreasuryManager.FlaunchToken[] memory user3Tokens = revenueManager.tokens(user3);
+
+        assertEq(user1Tokens.length, 2);
+        assertEq(user2Tokens.length, 1);
+        assertEq(user3Tokens.length, 0);
+
+        assertEq(address(user1Tokens[0].flaunch), address(flaunch));
+        assertEq(user1Tokens[0].tokenId, tokenId1);
+        assertEq(address(user1Tokens[1].flaunch), address(flaunch));
+        assertEq(user1Tokens[1].tokenId, tokenId2);
+        assertEq(address(user2Tokens[0].flaunch), address(flaunch));
+        assertEq(user2Tokens[0].tokenId, tokenId3);
     }
 
     function _createERC721(address _recipient) internal returns (uint tokenId_) {
@@ -561,6 +570,7 @@ contract RevenueManagerTest is FlaunchTest {
                 symbol: 'TOKEN',
                 tokenUri: 'https://flaunch.gg/',
                 initialTokenFairLaunch: supplyShare(50),
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: _recipient,
                 creatorFeeAllocation: 0,
@@ -574,63 +584,25 @@ contract RevenueManagerTest is FlaunchTest {
         return flaunch.tokenId(memecoin);
     }
 
-    function _assertClaimAmounts(
-        uint protocolFee,
-        bool protocolRecipientSet,
-        uint claimAmount,
-        uint creatorAmount,
-        uint protocolAmount
-    ) internal {
+    function _allocateFees(address _flaunch, uint _tokenId, uint _amount) internal {
         // Allocate the claim. The PoolId does not matter.
-        if (claimAmount != 0) {
-            // Mint ETH to the flETH contract to facilitate unwrapping
-            deal(address(this), claimAmount);
-            WETH.deposit{value: claimAmount}();
-            WETH.transfer(address(positionManager), claimAmount);
-
-            // Allocate our fees
-            positionManager.allocateFeesMock(PoolId.wrap('test'), address(revenueManager), claimAmount);
+        if (_amount == 0) {
+            return;
         }
 
-        // Set our protocol recipient and fee
-        vm.startPrank(owner);
-        revenueManager.setProtocolFee(protocolFee);
-        revenueManager.setProtocolRecipient(protocolRecipientSet ? protocolRecipient : payable(address(0)));
-        vm.stopPrank();
-
-        vm.expectEmit();
-        emit RevenueManager.RevenueClaimed({
-            _creator: nonOwner,
-            _creatorAmount: creatorAmount,
-            _creatorSuccess: true,
-            _protocol: protocolRecipientSet ? protocolRecipient : payable(address(0)),
-            _protocolAmount: protocolAmount,
-            _protocolSuccess: protocolAmount != 0
-        });
-
-        // Execute our claim
-        (uint creatorClaim, uint protocolClaim) = revenueManager.claim();
-
-        // Assert the returned claim amounts
-        assertEq(creatorAmount, creatorClaim);
-        assertEq(protocolAmount, protocolClaim);
-    }
-
-    function _assertClaimTotals(uint claimAmount, uint creatorTotal, uint protocolTotal) internal {
         // Mint ETH to the flETH contract to facilitate unwrapping
-        deal(address(this), claimAmount);
-        WETH.deposit{value: claimAmount}();
-        WETH.transfer(address(positionManager), claimAmount);
+        deal(address(this), _amount);
+        WETH.deposit{value: _amount}();
+        WETH.transfer(address(this), _amount);
 
-        // Allocate the claim. The PoolId does not matter.
-        positionManager.allocateFeesMock(PoolId.wrap('test'), address(revenueManager), claimAmount);
+        WETH.approve(address(feeEscrow), type(uint).max);
 
-        // Execute our claim
-        revenueManager.claim();
-
-        // Assert the returned claim amounts
-        assertEq(revenueManager.creatorTotalClaim(), creatorTotal);
-        assertEq(revenueManager.protocolTotalClaim(), protocolTotal);
+        // Allocate our fees
+        feeEscrow.allocateFees(
+            revenueManager.getPoolId(ITreasuryManager.FlaunchToken(Flaunch(_flaunch), _tokenId)),
+            address(revenueManager),
+            _amount
+        );
     }
 
     /**
@@ -638,7 +610,7 @@ contract RevenueManagerTest is FlaunchTest {
      */
     modifier freshManager {
         // Deploy a new {RevenueManager} implementation as we will be using a new tokenId
-        revenueManager = RevenueManager(factory.deployManager(managerImplementation));
+        revenueManager = RevenueManager(treasuryManagerFactory.deployManager(managerImplementation));
 
         _;
     }

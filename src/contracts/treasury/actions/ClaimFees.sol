@@ -87,4 +87,9 @@ contract ClaimFeesAction is ITreasuryAction {
         emit ActionExecuted(_poolKey, amount0.toInt256(), amount1.toInt256());
     }
 
+    /**
+     * Allows ETH claims to be made.
+     */
+    receive () external payable {}
+
 }

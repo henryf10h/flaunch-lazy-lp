@@ -42,6 +42,11 @@ type Metricer interface {
 	RecordChannelClosed(id derive.ChannelID, numPendingBlocks int, numFrames int, inputBytes int, outputComprBytes int, reason error)
 	RecordChannelFullySubmitted(id derive.ChannelID)
 	RecordChannelTimedOut(id derive.ChannelID)
+	RecordChannelQueueLength(len int)
+
+	// ClearAllStateMetrics resets any metrics that track current ChannelManager state
+	// It should be called when clearing the ChannelManager state.
+	ClearAllStateMetrics()
 
 	RecordBatchTxSubmitted()
 	RecordBatchTxSuccess()
@@ -86,6 +91,7 @@ type Metrics struct {
 	channelComprRatio       prometheus.Histogram
 	channelInputBytesTotal  prometheus.Counter
 	channelOutputBytesTotal prometheus.Counter
+	channelQueueLength      prometheus.Gauge
 
 	batcherTxEvs opmetrics.EventVec
 
@@ -191,6 +197,11 @@ func NewMetrics(procName string) *Metrics {
 			Name:      "output_bytes_total",
 			Help:      "Total number of compressed output bytes from a channel.",
 		}),
+		channelQueueLength: factory.NewGauge(prometheus.GaugeOpts{
+			Namespace: ns,
+			Name:      "channel_queue_length",
+			Help:      "The number of channels currently in memory.",
+		}),
 		blobUsedBytes: factory.NewHistogram(prometheus.HistogramOpts{
 			Namespace: ns,
 			Name:      "blob_used_bytes",
@@ -235,7 +246,6 @@ func (m *Metrics) RecordInfo(version string) {
 
 // RecordUp sets the up metric to 1.
 func (m *Metrics) RecordUp() {
-	prometheus.MustRegister()
 	m.up.Set(1)
 }
 
@@ -337,6 +347,21 @@ func (m *Metrics) RecordBatchTxFailed() {
 
 func (m *Metrics) RecordBlobUsedBytes(num int) {
 	m.blobUsedBytes.Observe(float64(num))
+}
+
+func (m *Metrics) RecordChannelQueueLength(len int) {
+	m.channelQueueLength.Set(float64(len))
+}
+
+// ClearAllStateMetrics clears all state metrics.
+//
+// This should cover any metric which is a Gauge and is incremented / decremented rather than "set".
+// Counter Metrics only ever go up, so they can't be reset and shouldn't be.
+// Gauge Metrics which are "set" will get the right value the next time they are updated and don't need to be reset.
+func (m *Metrics) ClearAllStateMetrics() {
+	m.RecordChannelQueueLength(0)
+	atomic.StoreInt64(&m.pendingDABytes, 0)
+	m.pendingBlocksBytesCurrent.Set(0)
 }
 
 // estimateBatchSize returns the estimated size of the block in a batch both with compression ('daSize') and without

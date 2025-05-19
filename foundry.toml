@@ -5,12 +5,16 @@ libs = ["lib"]
 optimizer = true
 optimizer_runs = 0
 evm_version = "cancun"
+block_gas_limit = 30000000000
 
 fs_permissions = [{ access = "read", path = "./script/offchain/output/" }]
 
 
 # 6321: Unnamed return variable can remain unassigned. Add an explicit return with value to all non-reverting code paths or name the variable.
-ignored_error_codes = [3860, 5574, 6321]
+ignored_error_codes = [3860, 5574, 5667, 6321]
+
+[etherscan]
+base-sepolia = { key = "${BASE_SEPOLIA_ETHERSCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
 
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"

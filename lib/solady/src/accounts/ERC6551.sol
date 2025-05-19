@@ -13,7 +13,7 @@ import {UUPSUpgradeable} from "../utils/UUPSUpgradeable.sol";
 /// @dev Recommended usage (regular):
 /// 1. Deploy the ERC6551 as an implementation contract, and verify it on Etherscan.
 /// 2. Use the canonical ERC6551Registry to deploy a clone to the ERC6551 implementation.
-///    The UUPSUpgradeable functions will simply become no-ops.
+///    The UUPSUpgradeable functions will be disabled.
 ///
 /// Recommended usage (upgradeable):
 /// 1. Deploy the ERC6551 as an implementation contract, and verify it on Etherscan.
@@ -60,9 +60,6 @@ abstract contract ERC6551 is UUPSUpgradeable, Receiver, ERC1271 {
 
     /// @dev Self ownership detected.
     error SelfOwnDetected();
-
-    /// @dev The function selector is not recognized.
-    error FnSelectorNotRecognized();
 
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
     /*                  CONSTANTS AND IMMUTABLES                  */
@@ -344,14 +341,30 @@ abstract contract ERC6551 is UUPSUpgradeable, Receiver, ERC1271 {
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
     /// @dev To ensure that only the owner or the account itself can upgrade the implementation.
-    /// If you don't need upgradeability, override this function to return false.
+    /// If you don't need upgradeability, override this function to return false for extra safety.
     function _authorizeUpgrade(address)
         internal
         virtual
         override(UUPSUpgradeable)
         onlyValidSigner
+        onlyViaERC6551Proxy
     {
         _updateState();
+    }
+
+    /// @dev Guards `_authorizeUpgrade` such that it must be used via an ERC6551Proxy.
+    modifier onlyViaERC6551Proxy() virtual {
+        address selfImplementation = _selfImplementation();
+        /// @solidity memory-safe-assembly
+        assembly {
+            extcodecopy(address(), 0x2c, 0x0a, 0x14) // Assumes the upper 20 bytes at 0x40 are zero.
+            // Revert if the implementation is the same as the self implementation.
+            if eq(mload(0x2c), shl(96, selfImplementation)) {
+                mstore(0x00, 0x9f03a026) // `UnauthorizedCallContext()`.
+                revert(0x1c, 0x04)
+            }
+        }
+        _;
     }
 
     /// @dev Uses the `owner` as the ERC1271 signer.
@@ -360,7 +373,7 @@ abstract contract ERC6551 is UUPSUpgradeable, Receiver, ERC1271 {
     }
 
     /// @dev For handling token callbacks.
-    /// Safe-transferred ERC721 tokens will trigger a ownership cycle check.
+    /// Safe-transferred ERC721 tokens will trigger an ownership cycle check.
     modifier receiverFallback() override(Receiver) {
         uint256 s = uint256(bytes32(msg.sig)) >> 224;
         // 0x150b7a02: `onERC721Received(address,address,uint256,bytes)`.

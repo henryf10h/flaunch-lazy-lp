@@ -9,11 +9,28 @@ pragma solidity ^0.8.4;
 /// - Collapses function table gas overhead and code size.
 /// - Utilizes fallback so unknown calldata will pass on.
 abstract contract Receiver {
+    /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+    /*                       CUSTOM ERRORS                        */
+    /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+
+    /// @dev The function selector is not recognized.
+    error FnSelectorNotRecognized();
+
+    /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+    /*                     RECEIVE / FALLBACK                     */
+    /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+
     /// @dev For receiving ETH.
     receive() external payable virtual {}
 
     /// @dev Fallback function with the `receiverFallback` modifier.
-    fallback() external payable virtual receiverFallback {}
+    fallback() external payable virtual receiverFallback {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, 0x3c10b94e) // `FnSelectorNotRecognized()`.
+            revert(0x1c, 0x04)
+        }
+    }
 
     /// @dev Modifier for the fallback function to handle token callbacks.
     modifier receiverFallback() virtual {
@@ -26,6 +43,7 @@ abstract contract Receiver {
                 // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
                 // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
                 if or(eq(s, 0x150b7a02), or(eq(s, 0xf23a6e61), eq(s, 0xbc197c81))) {
+                    // Assumes `mload(0x40) <= 0xffffffff` to save gas on cleaning lower bytes.
                     mstore(0x20, s) // Store `msg.sig`.
                     return(0x3c, 0x20) // Return `msg.sig`.
                 }

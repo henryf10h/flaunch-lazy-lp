@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IL2ToL2CrossDomainMessenger} from "@optimism/L2/interfaces/IL2ToL2CrossDomainMessenger.sol";
-import {Predeploys} from '@optimism/libraries/Predeploys.sol';
+import {IL2ToL2CrossDomainMessenger} from "@optimism/interfaces/L2/IL2ToL2CrossDomainMessenger.sol";
+import {Predeploys} from '@optimism/src/libraries/Predeploys.sol';
 
 import {Flaunch} from '@flaunch/Flaunch.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
@@ -18,6 +18,7 @@ contract FlaunchBridgeTest is FlaunchTest {
     uint TOKEN_ID = 1;
 
     /// Define an alternative chain
+    uint INITIAL_CHAIN_ID = 1;
     uint ALTERNATIVE_CHAIN_ID = 420691337;
 
     /// The memecoin used for testing
@@ -25,6 +26,9 @@ contract FlaunchBridgeTest is FlaunchTest {
 
     function setUp() public {
         _deployPlatform();
+
+        // Set our default chainId
+        INITIAL_CHAIN_ID = block.chainid;
 
         // Mock our messenger send to prevent errors
         vm.mockCall(
@@ -46,6 +50,7 @@ contract FlaunchBridgeTest is FlaunchTest {
                 symbol: 'TOKEN',
                 tokenUri: 'https://flaunch.gg/',
                 initialTokenFairLaunch: supplyShare(50),
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: address(this),
                 creatorFeeAllocation: 50_00,
@@ -60,10 +65,17 @@ contract FlaunchBridgeTest is FlaunchTest {
     }
 
     function test_CanInitializeBridge_Success() public {
-        // Confirm that the brdiging status is initially pending
-        assertFalse(
-            flaunch.bridgingStatus(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
-            "Bridging status should be false before initialization."
+        // Confirm that the bridging status is initially pending
+        assertEq(
+            flaunch.bridgingStarted(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
+            0,
+            "Bridging started should be zero before initialization."
+        );
+
+        assertEq(
+            flaunch.bridgingFinalized(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
+            false,
+            "Bridging should not be finalized by default."
         );
 
         vm.expectEmit();
@@ -71,17 +83,24 @@ contract FlaunchBridgeTest is FlaunchTest {
 
         flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
 
-        // Confirm that the brdiging status has updated
-        assertTrue(
-            flaunch.bridgingStatus(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
-            "Bridging status should be true after initialization."
+        // Confirm that the bridging status has updated
+        assertEq(
+            flaunch.bridgingStarted(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
+            block.timestamp,
+            "Bridging started should show current timestamp after initialization."
+        );
+
+        assertEq(
+            flaunch.bridgingFinalized(TOKEN_ID, ALTERNATIVE_CHAIN_ID),
+            false,
+            "Bridging should still not be finalized."
         );
     }
 
     function test_CannotInitializeBridge_AlreadyBridged() public {
         flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
 
-        vm.expectRevert(Flaunch.TokenAlreadyBridged.selector);
+        vm.expectRevert(Flaunch.TokenAlreadyBridging.selector);
         flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
     }
 
@@ -97,15 +116,14 @@ contract FlaunchBridgeTest is FlaunchTest {
             tokenUri: memecoin.tokenURI()
         });
 
+        uint tokenId = TOKEN_ID + 1;
+
         vm.chainId(ALTERNATIVE_CHAIN_ID);
 
         vm.expectEmit();
-        emit Flaunch.TokenBridged(TOKEN_ID + 1, ALTERNATIVE_CHAIN_ID, 0x1A727A1caeE6449862aEF80DC3b47E1759ad3967, 123);
+        emit Flaunch.TokenBridged(tokenId, ALTERNATIVE_CHAIN_ID, 0x1A727A1caeE6449862aEF80DC3b47E1759ad3967, 123);
 
-        flaunch.finalizeBridge(
-            TOKEN_ID + 1,
-            memecoinMetadata
-        );
+        flaunch.finalizeBridge(tokenId, memecoinMetadata);
 
         // Additional assertions
         IMemecoin bridgedMemecoin = IMemecoin(0x1A727A1caeE6449862aEF80DC3b47E1759ad3967);
@@ -113,6 +131,44 @@ contract FlaunchBridgeTest is FlaunchTest {
         assertEq(bridgedMemecoin.symbol(), memecoin.symbol());
         assertEq(bridgedMemecoin.tokenURI(), memecoin.tokenURI());
 
+        assertEq(
+            flaunch.bridgingFinalized(tokenId, ALTERNATIVE_CHAIN_ID),
+            true,
+            "Bridging should now be finalized after function successfully called."
+        );
+
+        // We should now receive a revert if we try to initialize the same contract again
+        vm.chainId(INITIAL_CHAIN_ID);
+
+        vm.expectRevert(abi.encodeWithSelector(Flaunch.TokenAlreadyBridged.selector));
+        flaunch.initializeBridge(tokenId, ALTERNATIVE_CHAIN_ID);
+    }
+
+    function test_CanRebridgeAfterBridgingWindow(uint _invalidTimeDelta, uint _validTimeDelta) public {
+        // Set our two testing timestamps; one which is below the window and one which is
+        // equal to, or above, the window.
+        vm.assume(_invalidTimeDelta < flaunch.MAX_BRIDGING_WINDOW());
+        vm.assume(_validTimeDelta >= flaunch.MAX_BRIDGING_WINDOW());
+
+        // Initialize our token bridge
+        flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
+
+        // Capture our initial block timestamp
+        uint startTimestamp = block.timestamp;
+
+        // Confirm that the bridging status has updated
+        assertEq(flaunch.bridgingStarted(TOKEN_ID, ALTERNATIVE_CHAIN_ID), block.timestamp);
+
+        vm.warp(startTimestamp + _invalidTimeDelta);
+
+        vm.expectRevert(abi.encodeWithSelector(Flaunch.TokenAlreadyBridging.selector));
+        flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
+
+        vm.warp(startTimestamp + _validTimeDelta);
+
+        flaunch.initializeBridge(TOKEN_ID, ALTERNATIVE_CHAIN_ID);
+
+        assertEq(flaunch.bridgingStarted(TOKEN_ID, ALTERNATIVE_CHAIN_ID), startTimestamp + _validTimeDelta);
     }
 
     modifier isValidMessenger {

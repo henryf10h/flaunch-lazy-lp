@@ -8,6 +8,8 @@ import {AccessControl} from '@openzeppelin/contracts/access/AccessControl.sol';
 
 import {TreasuryManager} from '@flaunch/treasury/managers/TreasuryManager.sol';
 
+import {IFeeEscrow} from '@flaunch-interfaces/IFeeEscrow.sol';
+import {ITreasuryManager} from '@flaunch-interfaces/ITreasuryManager.sol';
 import {ITreasuryManagerFactory} from '@flaunch-interfaces/ITreasuryManagerFactory.sol';
 
 
@@ -22,6 +24,8 @@ contract TreasuryManagerFactory is AccessControl, ITreasuryManagerFactory, Ownab
     event ManagerDeployed(address indexed _manager, address indexed _managerImplementation);
     event ManagerImplementationUnapproved(address indexed _managerImplementation);
 
+    IFeeEscrow public immutable feeEscrow;
+
     /// Mapping to store approved action contract addresses
     mapping (address _managerImplementation => bool _approved) public approvedManagerImplementation;
 
@@ -33,7 +37,9 @@ contract TreasuryManagerFactory is AccessControl, ITreasuryManagerFactory, Ownab
      *
      * @dev This contract should be created in the {PositionManager} constructor call.
      */
-    constructor (address _protocolOwner) {
+    constructor (address _protocolOwner, address _feeEscrow) {
+        feeEscrow = IFeeEscrow(_feeEscrow);
+
         _initializeOwner(_protocolOwner);
 
         // Set our protocol owner to have the default admin of protocol roles
@@ -60,6 +66,29 @@ contract TreasuryManagerFactory is AccessControl, ITreasuryManagerFactory, Ownab
         // implementation type for a manager, and also to validate that it's legit.
         managerImplementation[manager_] = _managerImplementation;
         emit ManagerDeployed(manager_, _managerImplementation);
+    }
+
+    /**
+     * Deploys an approved manager and initializes it in a single transaction.
+     *
+     * @param _managerImplementation The address of the approved implementation
+     * @param _owner The owner address of the manager
+     * @param _data The initialization data for the deployed manager
+     *
+     * @return manager_ The freshly deployed {TreasuryManager} contract address
+     */
+    function deployAndInitializeManager(
+        address _managerImplementation,
+        address _owner,
+        bytes calldata _data
+    ) public returns (
+        address payable manager_
+    ) {
+        // Deploy our manager implementation
+        manager_ = deployManager(_managerImplementation);
+
+        // Initialize the manager with the flaunched ERC721
+        ITreasuryManager(manager_).initialize(_owner, _data);
     }
 
     /**

@@ -20,8 +20,8 @@ library DynamicBufferLib {
     /*                         OPERATIONS                         */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-    // Some of these functions returns the same buffer for function chaining.
-    // `e.g. `buffer.p("1").p("2")`.
+    // Some of these functions return the same buffer for function chaining.
+    // e.g. `buffer.p("1").p("2")`.
 
     /// @dev Shorthand for `buffer.data.length`.
     function length(DynamicBuffer memory buffer) internal pure returns (uint256) {
@@ -101,7 +101,7 @@ library DynamicBufferLib {
                 // Approximately more than double the capacity to ensure more than enough space.
                 let newCap := and(add(cap, add(or(cap, newBufDataLen), 0x20)), w)
                 // If the memory is contiguous, we can simply expand it.
-                if iszero(or(xor(mload(0x40), add(bufData, add(0x40, cap))), eq(bufData, 0x60))) {
+                if iszero(or(xor(mload(0x40), add(bufData, add(0x40, cap))), iszero(cap))) {
                     // Store `cap * prime` in the word before the length.
                     mstore(add(bufData, w), mul(prime, newCap))
                     mstore(0x40, add(bufData, add(0x40, newCap))) // Expand the memory allocation.
@@ -1283,7 +1283,7 @@ library DynamicBufferLib {
     /*                      PRIVATE HELPERS                       */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-    /// @dev Helper for deallocating a automatically allocated `buffer` pointer.
+    /// @dev Helper for deallocating an automatically allocated `buffer` pointer.
     function _deallocate(DynamicBuffer memory result) private pure {
         /// @solidity memory-safe-assembly
         assembly {

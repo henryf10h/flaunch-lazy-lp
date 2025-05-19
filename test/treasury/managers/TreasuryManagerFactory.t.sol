@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {PositionManager} from '@flaunch/PositionManager.sol';
-import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 import {TreasuryManagerFactory} from '@flaunch/treasury/managers/TreasuryManagerFactory.sol';
-
-import {ITreasuryManager} from '@flaunch-interfaces/ITreasuryManager.sol';
 
 import {TreasuryManagerMock} from 'test/mocks/TreasuryManagerMock.sol';
 import {FlaunchTest} from 'test/FlaunchTest.sol';
@@ -13,47 +9,18 @@ import {FlaunchTest} from 'test/FlaunchTest.sol';
 
 contract TreasuryManagerFactoryTest is FlaunchTest {
 
-    TreasuryManagerFactory factory;
-
     /// Define some EOA addresses to test with
-    address owner = address(0x123);
     address nonOwner = address(0x456);
 
     address managerImplementation;
-    uint tokenId;
     bytes data;
 
     function setUp() public {
         // Deploy our platform
         _deployPlatform();
 
-        // Update our {TreasuryManagerFactory} deployment to use an explicit owner
-        factory = new TreasuryManagerFactory(owner);
-
-        vm.prank(owner);
-        factory.grantRole(ProtocolRoles.FLAUNCH, address(flaunch));
-
         // Deploy a mocked manager implementation
         managerImplementation = address(new TreasuryManagerMock(address(treasuryManagerFactory)));
-
-        // Flaunch a memecoin that we can test with
-        address memecoin = positionManager.flaunch(
-            PositionManager.FlaunchParams({
-                name: 'Token Name',
-                symbol: 'TOKEN',
-                tokenUri: 'https://flaunch.gg/',
-                initialTokenFairLaunch: supplyShare(50),
-                premineAmount: 0,
-                creator: owner,
-                creatorFeeAllocation: 0,
-                flaunchAt: 0,
-                initialPriceParams: abi.encode(''),
-                feeCalculatorParams: abi.encode(1_000)
-            })
-        );
-
-        // Store the memecoin information
-        tokenId = flaunch.tokenId(memecoin);
 
         // Create some test data that we can pass
         data = abi.encode('Test initialization');
@@ -63,92 +30,78 @@ contract TreasuryManagerFactoryTest is FlaunchTest {
         vm.expectEmit();
         emit TreasuryManagerFactory.ManagerImplementationApproved(managerImplementation);
 
-        vm.prank(owner);
-        factory.approveManager(managerImplementation);
-        assertTrue(factory.approvedManagerImplementation(managerImplementation));
+        treasuryManagerFactory.approveManager(managerImplementation);
+        assertTrue(treasuryManagerFactory.approvedManagerImplementation(managerImplementation));
     }
 
     function test_approveManager_notOwner() public {
         vm.startPrank(nonOwner);
 
         vm.expectRevert(UNAUTHORIZED);
-        factory.approveManager(managerImplementation);
+        treasuryManagerFactory.approveManager(managerImplementation);
 
         vm.stopPrank();
     }
 
     function test_unapproveManager() public {
-        vm.startPrank(owner);
-        factory.approveManager(managerImplementation);
+        treasuryManagerFactory.approveManager(managerImplementation);
 
         vm.expectEmit();
         emit TreasuryManagerFactory.ManagerImplementationUnapproved(managerImplementation);
 
-        factory.unapproveManager(managerImplementation);
+        treasuryManagerFactory.unapproveManager(managerImplementation);
         vm.stopPrank();
 
-        assertFalse(factory.approvedManagerImplementation(managerImplementation));
+        assertFalse(treasuryManagerFactory.approvedManagerImplementation(managerImplementation));
     }
 
     function test_unapproveManager_notOwner() public {
         vm.startPrank(nonOwner);
 
         vm.expectRevert(UNAUTHORIZED);
-        factory.unapproveManager(managerImplementation);
+        treasuryManagerFactory.unapproveManager(managerImplementation);
 
         vm.stopPrank();
     }
 
     function test_unapproveManager_unknownManager() public {
-        vm.startPrank(owner);
-
         vm.expectRevert(TreasuryManagerFactory.UnknownManagerImplemention.selector);
-        factory.unapproveManager(managerImplementation);
+        treasuryManagerFactory.unapproveManager(managerImplementation);
 
         vm.stopPrank();
     }
 
     function test_deployManager() public {
-        vm.startPrank(owner);
-        factory.approveManager(managerImplementation);
+        treasuryManagerFactory.approveManager(managerImplementation);
 
         // We know the address in advance for this test, so we can assert the expected value
         vm.expectEmit();
-        emit TreasuryManagerFactory.ManagerDeployed(0x3cb0b7B82686A4cbc432f553004F13d0629Ae610, managerImplementation);
+        emit TreasuryManagerFactory.ManagerDeployed(0xA02A0858A7B38B1f7F3230FAD136BD895C412CE5, managerImplementation);
 
         // Deploy our new manager
-        address payable _manager = factory.deployManager(managerImplementation);
+        address payable _manager = treasuryManagerFactory.deployManager(managerImplementation);
 
         // Confirm that the implementation is as expected
-        assertEq(factory.managerImplementation(_manager), managerImplementation);
+        assertEq(treasuryManagerFactory.managerImplementation(_manager), managerImplementation);
 
         // Ensure that we can initialize our manager after deployment
-        flaunch.approve(_manager, tokenId);
-        TreasuryManagerMock(_manager).initialize(ITreasuryManager.FlaunchToken(flaunch, tokenId), owner, data);
+        TreasuryManagerMock(_manager).initialize(address(this), data);
         vm.stopPrank();
-
-        // Confirm that the manager is now the token owner
-        assertEq(flaunch.ownerOf(tokenId), _manager);
     }
 
     function test_deployManager_notApproved() public {
         vm.expectRevert(TreasuryManagerFactory.UnknownManagerImplemention.selector);
-        factory.deployManager(managerImplementation);
+        treasuryManagerFactory.deployManager(managerImplementation);
     }
 
-    function test_deployManager_duplicateTokenId() public {
-        vm.startPrank(owner);
+    function test_deployManager_cannotInitializeMultipleTimes() public {
+        treasuryManagerFactory.approveManager(managerImplementation);
+        address payable _manager = treasuryManagerFactory.deployManager(managerImplementation);
 
-        factory.approveManager(managerImplementation);
-        address payable _manager = factory.deployManager(managerImplementation);
-
-        flaunch.approve(_manager, tokenId);
-        TreasuryManagerMock(_manager).initialize(ITreasuryManager.FlaunchToken(flaunch, tokenId), owner, data);
+        TreasuryManagerMock(_manager).initialize(address(this), data);
 
         vm.expectRevert();
-        TreasuryManagerMock(_manager).initialize(ITreasuryManager.FlaunchToken(flaunch, tokenId), owner, data);
-
-        vm.stopPrank();
+        TreasuryManagerMock(_manager).initialize(address(this), data);
     }
 
 }

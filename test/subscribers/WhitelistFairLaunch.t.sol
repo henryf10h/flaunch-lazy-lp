@@ -627,6 +627,7 @@ contract WhitelistFairLaunchTest is FlaunchTest {
                 symbol: 'TKN',
                 tokenUri: VALID_MERKLE_IPFS,
                 initialTokenFairLaunch: INITIAL_TOKEN_FAIR_LAUNCH,
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: address(this),
                 creatorFeeAllocation: 20_00,
@@ -648,7 +649,8 @@ contract WhitelistFairLaunchTest is FlaunchTest {
             }),
             _treasuryManagerParams: FlaunchZap.TreasuryManagerParams({
                 manager: address(0),
-                data: abi.encode('')
+                initializeData: abi.encode(''),
+                depositData: abi.encode('')
             })
         });
 

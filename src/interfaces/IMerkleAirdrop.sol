@@ -28,6 +28,7 @@ interface IMerkleAirdrop is IBaseAirdrop {
 
     error InvalidAirdropIndex();
     error AirdropAlreadyExists();
+    error AirdropExpired();
     error MerkleVerificationFailed();
 
     function airdropsCount(address _creator) external view returns (uint);

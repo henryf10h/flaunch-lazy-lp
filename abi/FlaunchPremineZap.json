@@ -102,6 +102,11 @@
               "internalType": "uint256"
             },
             {
+              "name": "fairLaunchDuration",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
               "name": "premineAmount",
               "type": "uint256",
               "internalType": "uint256"

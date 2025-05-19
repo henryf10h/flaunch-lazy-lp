@@ -67,6 +67,9 @@ contract BidWall is AccessControl, Ownable {
     /// Emitted when the `_swapFeeThreshold` is updated
     event FixedSwapFeeThresholdUpdated(uint _newSwapFeeThreshold);
 
+    /// Emitted when the `staleTimeWindow` is updated
+    event StaleTimeWindowUpdated(uint _staleTimeWindow);
+
     /**
      * Stores the BidWall information for a specific pool.
      *
@@ -86,14 +89,14 @@ contract BidWall is AccessControl, Ownable {
         uint cumulativeSwapFees;
     }
 
-    /// Timeout period to make a BidWall stale based on last transaction time
-    uint public constant STALE_TIME_WINDOW = 7 days;
-
     /// Our Uniswap V4 {PoolManager} contract
     IPoolManager public immutable poolManager;
 
     /// The native token used in the Flaunch protocol
     address public immutable nativeToken;
+
+    /// Timeout period to make a BidWall stale based on last transaction time
+    uint public staleTimeWindow = 7 days;
 
     /// Our fixed swap fee threshold
     uint internal _swapFeeThreshold;
@@ -109,6 +112,7 @@ contract BidWall is AccessControl, Ownable {
      *
      * @param _nativeToken The ETH token being used in the {PositionManager}
      * @param _poolManager The Uniswap V4 {PoolManager}
+     * @param _protocolOwner The address of the protocol owner
      */
     constructor (address _nativeToken, address _poolManager, address _protocolOwner) {
         nativeToken = _nativeToken;
@@ -117,6 +121,9 @@ contract BidWall is AccessControl, Ownable {
         // Set our initial swapFeeThreshold and emit an update for the amount
         _swapFeeThreshold = 0.1 ether;
         emit FixedSwapFeeThresholdUpdated(0.1 ether);
+
+        // Emit our initial `staleTimeWindow` update
+        emit StaleTimeWindowUpdated(staleTimeWindow);
 
         // Set our caller to have the default admin of protocol roles
         _grantRole(DEFAULT_ADMIN_ROLE, _protocolOwner);
@@ -194,7 +201,7 @@ contract BidWall is AccessControl, Ownable {
     ) external onlyPositionManager {
         // If our pool has not fallen stale, then exit early
         PoolId poolId = _poolKey.toId();
-        if (lastPoolTransaction[poolId] + STALE_TIME_WINDOW > block.timestamp) {
+        if (lastPoolTransaction[poolId] + staleTimeWindow > block.timestamp) {
             return;
         }
 
@@ -442,6 +449,16 @@ contract BidWall is AccessControl, Ownable {
     function setSwapFeeThreshold(uint swapFeeThreshold) external onlyOwner {
         _swapFeeThreshold = swapFeeThreshold;
         emit FixedSwapFeeThresholdUpdated(_swapFeeThreshold);
+    }
+
+    /**
+     * Allows the threshold for a BidWall to be deemed stale to be updated.
+     *
+     * @param _staleTimeWindow The new stale time window to set
+     */
+    function setStaleTimeWindow(uint _staleTimeWindow) external onlyOwner {
+        staleTimeWindow = _staleTimeWindow;
+        emit StaleTimeWindowUpdated(_staleTimeWindow);
     }
 
     /**

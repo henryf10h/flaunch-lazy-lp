@@ -69,20 +69,13 @@ var Commands = []*cli.Command{
 		Action:    L2SemversCLI,
 		Flags:     Flags,
 	},
-	{
-		Name:      "superchain-registry",
-		Usage:     "outputs the .env file expected by superchain-registry add-chain tool",
-		Args:      true,
-		ArgsUsage: "<l2-chain-id>",
-		Action:    SuperchainRegistryCLI,
-		Flags:     Flags,
-	},
 }
 
 type cliConfig struct {
-	Workdir string
-	Outfile string
-	ChainID common.Hash
+	Workdir  string
+	Outfile  string
+	ChainID  common.Hash
+	CacheDir string
 }
 
 func readConfig(cliCtx *cli.Context) (cliConfig, error) {
@@ -109,8 +102,9 @@ func readConfig(cliCtx *cli.Context) (cliConfig, error) {
 	}
 
 	return cliConfig{
-		Workdir: cliCtx.String(deployer.WorkdirFlagName),
-		Outfile: cliCtx.String(OutfileFlagName),
-		ChainID: chainID,
+		Workdir:  cliCtx.String(deployer.WorkdirFlagName),
+		Outfile:  cliCtx.String(OutfileFlagName),
+		ChainID:  chainID,
+		CacheDir: cliCtx.String(deployer.CacheDirFlag.Name),
 	}, nil
 }

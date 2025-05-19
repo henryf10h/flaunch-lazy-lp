@@ -11,7 +11,10 @@ import {Flaunch} from '@flaunch/Flaunch.sol';
 interface ITreasuryManager {
 
     /**
-     * ..
+     * The Flaunch Token definition.
+     *
+     * @param flaunch The flaunch contract used to launch the token
+     * @param tokenId The tokenId of the Flaunch ERC721
      */
     struct FlaunchToken {
         Flaunch flaunch;
@@ -19,13 +22,21 @@ interface ITreasuryManager {
     }
 
     /**
-     * Initializes the token by setting the contract ownership and transferring the ERC721
-     * into the manager. It then processes extended logic.
+     * Initializes the token by setting the contract ownership for the manager. It then processes
+     * extended logic.
      *
      * @dev The {TreasuryManager} implementation will use an internal `_initialize` call for
      * their own logic.
      */
-    function initialize(FlaunchToken calldata _flaunchToken, address _owner, bytes calldata _data) external;
+    function initialize(address _owner, bytes calldata _data) external;
+
+    /**
+     * Transfers the ERC721 into the manager. It then processes extended logic.
+     *
+     * @dev The {TreasuryManager} implementation will use an internal `_deposit` call for
+     * their own logic.
+     */
+    function deposit(FlaunchToken calldata _flaunchToken, address _creator, bytes calldata _data) external;
 
     /**
      * Allows the ERC721 to be rescued from the manager by the owner of the contract.

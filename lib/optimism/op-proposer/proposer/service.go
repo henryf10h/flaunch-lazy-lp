@@ -11,13 +11,16 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-proposer/metrics"
 	"github.com/ethereum-optimism/optimism/op-proposer/proposer/rpc"
+	"github.com/ethereum-optimism/optimism/op-proposer/proposer/source"
 	opservice "github.com/ethereum-optimism/optimism/op-service"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
+	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 
@@ -57,7 +60,7 @@ type ProposerService struct {
 
 	TxManager      txmgr.TxManager
 	L1Client       *ethclient.Client
-	RollupProvider dial.RollupProvider
+	ProposalSource source.ProposalSource
 
 	driver *L2OutputSubmitter
 
@@ -129,17 +132,32 @@ func (ps *ProposerService) initRPCClients(ctx context.Context, cfg *CLIConfig) e
 	}
 	ps.L1Client = l1Client
 
-	var rollupProvider dial.RollupProvider
-	if strings.Contains(cfg.RollupRpc, ",") {
-		rollupUrls := strings.Split(cfg.RollupRpc, ",")
-		rollupProvider, err = dial.NewActiveL2RollupProvider(ctx, rollupUrls, cfg.ActiveSequencerCheckDuration, dial.DefaultDialTimeout, ps.Log)
-	} else {
-		rollupProvider, err = dial.NewStaticL2RollupProvider(ctx, ps.Log, cfg.RollupRpc)
+	if cfg.RollupRpc != "" {
+		var rollupProvider dial.RollupProvider
+		if strings.Contains(cfg.RollupRpc, ",") {
+			rollupUrls := strings.Split(cfg.RollupRpc, ",")
+			rollupProvider, err = dial.NewActiveL2RollupProvider(ctx, rollupUrls, cfg.ActiveSequencerCheckDuration, dial.DefaultDialTimeout, ps.Log)
+		} else {
+			rollupProvider, err = dial.NewStaticL2RollupProvider(ctx, ps.Log, cfg.RollupRpc)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to build L2 endpoint provider: %w", err)
+		}
+		ps.ProposalSource = source.NewRollupProposalSource(rollupProvider)
 	}
-	if err != nil {
-		return fmt.Errorf("failed to build L2 endpoint provider: %w", err)
+	if len(cfg.SupervisorRpcs) != 0 {
+		var clients []source.SupervisorClient
+		for _, url := range cfg.SupervisorRpcs {
+			supervisorRpc, err := dial.DialRPCClientWithTimeout(ctx, dial.DefaultDialTimeout, ps.Log, url)
+			if err != nil {
+				return fmt.Errorf("failed to dial supervisor RPC client (%v): %w", url, err)
+			}
+			cl := sources.NewSupervisorClient(client.NewBaseRPCClient(supervisorRpc,
+				client.WithRPCRecorder(ps.Metrics.NewRecorder("supervisor"))))
+			clients = append(clients, cl)
+		}
+		ps.ProposalSource = source.NewSupervisorProposalSource(ps.Log, clients...)
 	}
-	ps.RollupProvider = rollupProvider
 	return nil
 }
 
@@ -232,7 +250,7 @@ func (ps *ProposerService) initDriver() error {
 		Txmgr:          ps.TxManager,
 		L1Client:       ps.L1Client,
 		Multicaller:    batching.NewMultiCaller(ps.L1Client.Client(), batching.DefaultBatchSize),
-		RollupProvider: ps.RollupProvider,
+		ProposalSource: ps.ProposalSource,
 	})
 	if err != nil {
 		return err
@@ -247,9 +265,10 @@ func (ps *ProposerService) initRPCServer(cfg *CLIConfig) error {
 		cfg.RPCConfig.ListenPort,
 		ps.Version,
 		oprpc.WithLogger(ps.Log),
+		oprpc.WithRPCRecorder(ps.Metrics.NewRecorder("main")),
 	)
 	if cfg.RPCConfig.EnableAdmin {
-		adminAPI := rpc.NewAdminAPI(ps.driver, ps.Metrics, ps.Log)
+		adminAPI := rpc.NewAdminAPI(ps.driver, ps.Log)
 		server.AddAPI(rpc.GetAdminAPI(adminAPI))
 		server.AddAPI(ps.TxManager.API())
 		ps.Log.Info("Admin RPC enabled")
@@ -326,8 +345,8 @@ func (ps *ProposerService) Stop(ctx context.Context) error {
 		ps.L1Client.Close()
 	}
 
-	if ps.RollupProvider != nil {
-		ps.RollupProvider.Close()
+	if ps.ProposalSource != nil {
+		ps.ProposalSource.Close()
 	}
 
 	if result == nil {
@@ -344,4 +363,11 @@ var _ cliapp.Lifecycle = (*ProposerService)(nil)
 // to start/stop/restart the L2Output-submission work, for use in testing.
 func (ps *ProposerService) Driver() rpc.ProposerDriver {
 	return ps.driver
+}
+
+func (ps *ProposerService) HTTPEndpoint() string {
+	if ps.rpcServer == nil {
+		return ""
+	}
+	return "http://" + ps.rpcServer.Endpoint()
 }

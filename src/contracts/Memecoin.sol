@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IERC7802, IERC165} from '@optimism/L2/interfaces/IERC7802.sol';
-import {ISemver} from '@optimism/universal/interfaces/ISemver.sol';
-import {Predeploys} from '@optimism/libraries/Predeploys.sol';
-import {Unauthorized} from '@optimism/libraries/errors/CommonErrors.sol';
+import {IERC7802, IERC165} from '@optimism/interfaces/L2/IERC7802.sol';
+import {ISemver} from '@optimism/interfaces/universal/ISemver.sol';
+import {Predeploys} from '@optimism/src/libraries/Predeploys.sol';
+import {Unauthorized} from '@optimism/src/libraries/errors/CommonErrors.sol';
 
 import {IERC20} from '@openzeppelin/contracts/interfaces/IERC20.sol';
 import {IERC20Upgradeable, IERC5805Upgradeable, IERC20PermitUpgradeable} from '@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol';
@@ -160,6 +160,13 @@ contract Memecoin is ERC20PermitUpgradeable, ERC20VotesUpgradeable, IERC7802, IM
     }
 
     /**
+     * The clock is timestamp based.
+     */
+    function CLOCK_MODE() public view virtual override returns (string memory) {
+        return "mode=timestamp&from=default";
+    }
+
+    /**
      * Finds the "creator" of the memecoin, which equates to the owner of the {Flaunch} ERC721. This
      * means that if the NFT is traded, then the new holder would become the creator.
      *
@@ -170,7 +177,8 @@ contract Memecoin is ERC20PermitUpgradeable, ERC20VotesUpgradeable, IERC7802, IM
     function creator() public view override returns (address creator_) {
         uint tokenId = flaunch.tokenId(address(this));
 
-        // Handle case where the token has been burned
+        // Handle case where the token has been burned. This is wrapped in a try/catch as we don't
+        // want to revert if the token has a zero address owner (the default ERC721 logic).
         try flaunch.ownerOf(tokenId) returns (address owner) {
             creator_ = owner;
         } catch {}
@@ -242,10 +250,12 @@ contract Memecoin is ERC20PermitUpgradeable, ERC20VotesUpgradeable, IERC7802, IM
     /**
      * Semantic version of the SuperchainERC20 that is implemented.
      *
+     * @custom:semver 1.0.2
+     *
      * @return string String representation of the implemented version
      */
     function version() external view virtual returns (string memory) {
-        return '1.0.0-beta.5';
+        return '1.0.2';
     }
 
     /**
@@ -256,7 +266,7 @@ contract Memecoin is ERC20PermitUpgradeable, ERC20VotesUpgradeable, IERC7802, IM
      */
     function crosschainMint(address _to, uint _amount) external onlySuperchain {
         _mint(_to, _amount);
-        emit CrosschainMint(_to, _amount);
+        emit CrosschainMint(_to, _amount, msg.sender);
     }
 
     /**
@@ -267,7 +277,7 @@ contract Memecoin is ERC20PermitUpgradeable, ERC20VotesUpgradeable, IERC7802, IM
      */
     function crosschainBurn(address _from, uint _amount) external onlySuperchain {
         _burn(_from, _amount);
-        emit CrosschainBurn(_from, _amount);
+        emit CrosschainBurn(_from, _amount, msg.sender);
     }
 
 

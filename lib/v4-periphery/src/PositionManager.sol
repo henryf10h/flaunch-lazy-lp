@@ -1,9 +1,8 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
@@ -11,13 +10,14 @@ import {Position} from "@uniswap/v4-core/src/libraries/Position.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
-import {IPositionDescriptor} from "./interfaces/IPositionDescriptor.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
+import {IPositionDescriptor} from "./interfaces/IPositionDescriptor.sol";
 import {ERC721Permit_v4} from "./base/ERC721Permit_v4.sol";
 import {ReentrancyLock} from "./base/ReentrancyLock.sol";
 import {IPositionManager} from "./interfaces/IPositionManager.sol";
 import {Multicall_v4} from "./base/Multicall_v4.sol";
-import {PoolInitializer} from "./base/PoolInitializer.sol";
+import {PoolInitializer_v4} from "./base/PoolInitializer_v4.sol";
 import {DeltaResolver} from "./base/DeltaResolver.sol";
 import {BaseActionsRouter} from "./base/BaseActionsRouter.sol";
 import {Actions} from "./libraries/Actions.sol";
@@ -26,6 +26,7 @@ import {CalldataDecoder} from "./libraries/CalldataDecoder.sol";
 import {Permit2Forwarder} from "./base/Permit2Forwarder.sol";
 import {SlippageCheck} from "./libraries/SlippageCheck.sol";
 import {PositionInfo, PositionInfoLibrary} from "./libraries/PositionInfoLibrary.sol";
+import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 import {NativeWrapper} from "./base/NativeWrapper.sol";
 import {IWETH9} from "./interfaces/external/IWETH9.sol";
 
@@ -98,7 +99,7 @@ import {IWETH9} from "./interfaces/external/IWETH9.sol";
 contract PositionManager is
     IPositionManager,
     ERC721Permit_v4,
-    PoolInitializer,
+    PoolInitializer_v4,
     Multicall_v4,
     DeltaResolver,
     ReentrancyLock,
@@ -107,14 +108,12 @@ contract PositionManager is
     Permit2Forwarder,
     NativeWrapper
 {
-    using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
     using SafeCast for uint256;
     using SafeCast for int256;
     using CalldataDecoder for bytes;
     using SlippageCheck for BalanceDelta;
-    using PositionInfoLibrary for PositionInfo;
 
     /// @inheritdoc IPositionManager
     /// @dev The ID of the next token that will be minted. Skips 0
@@ -199,6 +198,11 @@ contract PositionManager is
                     params.decodeModifyLiquidityParams();
                 _increase(tokenId, liquidity, amount0Max, amount1Max, hookData);
                 return;
+            } else if (action == Actions.INCREASE_LIQUIDITY_FROM_DELTAS) {
+                (uint256 tokenId, uint128 amount0Max, uint128 amount1Max, bytes calldata hookData) =
+                    params.decodeIncreaseLiquidityFromDeltasParams();
+                _increaseFromDeltas(tokenId, amount0Max, amount1Max, hookData);
+                return;
             } else if (action == Actions.DECREASE_LIQUIDITY) {
                 (uint256 tokenId, uint256 liquidity, uint128 amount0Min, uint128 amount1Min, bytes calldata hookData) =
                     params.decodeModifyLiquidityParams();
@@ -216,6 +220,18 @@ contract PositionManager is
                     bytes calldata hookData
                 ) = params.decodeMintParams();
                 _mint(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, _mapRecipient(owner), hookData);
+                return;
+            } else if (action == Actions.MINT_POSITION_FROM_DELTAS) {
+                (
+                    PoolKey calldata poolKey,
+                    int24 tickLower,
+                    int24 tickUpper,
+                    uint128 amount0Max,
+                    uint128 amount1Max,
+                    address owner,
+                    bytes calldata hookData
+                ) = params.decodeMintFromDeltasParams();
+                _mintFromDeltas(poolKey, tickLower, tickUpper, amount0Max, amount1Max, _mapRecipient(owner), hookData);
                 return;
             } else if (action == Actions.BURN_POSITION) {
                 // Will automatically decrease liquidity to 0 if the position is not already empty.
@@ -283,6 +299,34 @@ contract PositionManager is
         (liquidityDelta - feesAccrued).validateMaxIn(amount0Max, amount1Max);
     }
 
+    /// @dev The liquidity delta is derived from open deltas in the pool manager.
+    function _increaseFromDeltas(uint256 tokenId, uint128 amount0Max, uint128 amount1Max, bytes calldata hookData)
+        internal
+        onlyIfApproved(msgSender(), tokenId)
+    {
+        (PoolKey memory poolKey, PositionInfo info) = getPoolAndPositionInfo(tokenId);
+
+        uint256 liquidity;
+        {
+            (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
+
+            // Use the credit on the pool manager as the amounts for the mint.
+            liquidity = LiquidityAmounts.getLiquidityForAmounts(
+                sqrtPriceX96,
+                TickMath.getSqrtPriceAtTick(info.tickLower()),
+                TickMath.getSqrtPriceAtTick(info.tickUpper()),
+                _getFullCredit(poolKey.currency0),
+                _getFullCredit(poolKey.currency1)
+            );
+        }
+
+        // Note: The tokenId is used as the salt for this position, so every minted position has unique storage in the pool manager.
+        (BalanceDelta liquidityDelta, BalanceDelta feesAccrued) =
+            _modifyLiquidity(info, poolKey, liquidity.toInt256(), bytes32(tokenId), hookData);
+        // Slippage checks should be done on the principal liquidityDelta which is the liquidityDelta - feesAccrued
+        (liquidityDelta - feesAccrued).validateMaxIn(amount0Max, amount1Max);
+    }
+
     /// @dev Calling decrease with 0 liquidity will credit the caller with any underlying fees of the position
     function _decrease(
         uint256 tokenId,
@@ -335,6 +379,29 @@ contract PositionManager is
         liquidityDelta.validateMaxIn(amount0Max, amount1Max);
     }
 
+    function _mintFromDeltas(
+        PoolKey calldata poolKey,
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 amount0Max,
+        uint128 amount1Max,
+        address owner,
+        bytes calldata hookData
+    ) internal {
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
+
+        // Use the credit on the pool manager as the amounts for the mint.
+        uint256 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtPriceAtTick(tickLower),
+            TickMath.getSqrtPriceAtTick(tickUpper),
+            _getFullCredit(poolKey.currency0),
+            _getFullCredit(poolKey.currency1)
+        );
+
+        _mint(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, owner, hookData);
+    }
+
     /// @dev this is overloaded with ERC721Permit_v4._burn
     function _burn(uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes calldata hookData)
         internal
@@ -344,20 +411,31 @@ contract PositionManager is
 
         uint256 liquidity = uint256(_getLiquidity(tokenId, poolKey, info.tickLower(), info.tickUpper()));
 
+        address owner = ownerOf(tokenId);
+
         // Clear the position info.
         positionInfo[tokenId] = PositionInfoLibrary.EMPTY_POSITION_INFO;
         // Burn the token.
         _burn(tokenId);
 
         // Can only call modify if there is non zero liquidity.
+        BalanceDelta feesAccrued;
         if (liquidity > 0) {
-            (BalanceDelta liquidityDelta, BalanceDelta feesAccrued) =
-                _modifyLiquidity(info, poolKey, -(liquidity.toInt256()), bytes32(tokenId), hookData);
+            BalanceDelta liquidityDelta;
+            // do not use _modifyLiquidity as we do not need to notify on modification for burns.
+            IPoolManager.ModifyLiquidityParams memory params = IPoolManager.ModifyLiquidityParams({
+                tickLower: info.tickLower(),
+                tickUpper: info.tickUpper(),
+                liquidityDelta: -(liquidity.toInt256()),
+                salt: bytes32(tokenId)
+            });
+            (liquidityDelta, feesAccrued) = poolManager.modifyLiquidity(poolKey, params, hookData);
             // Slippage checks should be done on the principal liquidityDelta which is the liquidityDelta - feesAccrued
             (liquidityDelta - feesAccrued).validateMinOut(amount0Min, amount1Min);
         }
 
-        if (info.hasSubscriber()) _unsubscribe(tokenId);
+        // deletes then notifies the subscriber
+        if (info.hasSubscriber()) _removeSubscriberAndNotifyBurn(tokenId, owner, info, liquidity, feesAccrued);
     }
 
     function _settlePair(Currency currency0, Currency currency1) internal {
@@ -389,8 +467,10 @@ contract PositionManager is
 
     /// @dev integrators may elect to forfeit positive deltas with clear
     /// if the forfeit amount exceeds the user-specified max, the amount is taken instead
+    /// if there is no credit, no call is made.
     function _clearOrTake(Currency currency, uint256 amountMax) internal {
         uint256 delta = _getFullCredit(currency);
+        if (delta == 0) return;
 
         // forfeit the delta if its less than or equal to the user-specified limit
         if (delta <= amountMax) {
@@ -406,6 +486,7 @@ contract PositionManager is
         if (balance > 0) currency.transfer(to, balance);
     }
 
+    /// @dev if there is a subscriber attached to the position, this function will notify the subscriber
     function _modifyLiquidity(
         PositionInfo info,
         PoolKey memory poolKey,
@@ -453,7 +534,7 @@ contract PositionManager is
     /// @dev will revert if pool manager is locked
     function transferFrom(address from, address to, uint256 id) public virtual override onlyIfPoolManagerLocked {
         super.transferFrom(from, to, id);
-        if (positionInfo[id].hasSubscriber()) _notifyTransfer(id, from, to);
+        if (positionInfo[id].hasSubscriber()) _unsubscribe(id);
     }
 
     /// @inheritdoc IPositionManager

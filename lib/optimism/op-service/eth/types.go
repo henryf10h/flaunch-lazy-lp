@@ -10,11 +10,13 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 )
@@ -69,6 +71,32 @@ func (ie InputError) Is(target error) bool {
 	return ok // we implement Unwrap, so we do not have to check the inner type now
 }
 
+// Bytes65 is a 65-byte long byte string, and encoded with 0x-prefix in hex.
+// This can be used to represent encoded secp256k ethereum signatures.
+type Bytes65 [65]byte
+
+func (b *Bytes65) UnmarshalJSON(text []byte) error {
+	return hexutil.UnmarshalFixedJSON(reflect.TypeOf(b), text, b[:])
+}
+
+func (b *Bytes65) UnmarshalText(text []byte) error {
+	return hexutil.UnmarshalFixedText("Bytes65", text, b[:])
+}
+
+func (b Bytes65) MarshalText() ([]byte, error) {
+	return hexutil.Bytes(b[:]).MarshalText()
+}
+
+func (b Bytes65) String() string {
+	return hexutil.Encode(b[:])
+}
+
+// TerminalString implements log.TerminalStringer, formatting a string for console
+// output during logging.
+func (b Bytes65) TerminalString() string {
+	return fmt.Sprintf("0x%x..%x", b[:3], b[65-3:])
+}
+
 type Bytes32 [32]byte
 
 func (b *Bytes32) UnmarshalJSON(text []byte) error {
@@ -90,7 +118,7 @@ func (b Bytes32) String() string {
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (b Bytes32) TerminalString() string {
-	return fmt.Sprintf("%x..%x", b[:3], b[29:])
+	return fmt.Sprintf("0x%x..%x", b[:3], b[29:])
 }
 
 type Bytes8 [8]byte
@@ -114,7 +142,7 @@ func (b Bytes8) String() string {
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (b Bytes8) TerminalString() string {
-	return fmt.Sprintf("%x", b[:])
+	return fmt.Sprintf("0x%x", b[:])
 }
 
 type Bytes96 [96]byte
@@ -138,7 +166,7 @@ func (b Bytes96) String() string {
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (b Bytes96) TerminalString() string {
-	return fmt.Sprintf("%x..%x", b[:3], b[93:])
+	return fmt.Sprintf("0x%x..%x", b[:3], b[93:])
 }
 
 type Bytes256 [256]byte
@@ -162,7 +190,7 @@ func (b Bytes256) String() string {
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
 func (b Bytes256) TerminalString() string {
-	return fmt.Sprintf("%x..%x", b[:3], b[253:])
+	return fmt.Sprintf("0x%x..%x", b[:3], b[253:])
 }
 
 type Uint64Quantity = hexutil.Uint64
@@ -208,6 +236,14 @@ type ExecutionPayloadEnvelope struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload"`
 }
 
+func (env *ExecutionPayloadEnvelope) ID() BlockID {
+	return env.ExecutionPayload.ID()
+}
+
+func (env *ExecutionPayloadEnvelope) String() string {
+	return fmt.Sprintf("envelope(%s)", env.ID())
+}
+
 type ExecutionPayload struct {
 	ParentHash    common.Hash     `json:"parentHash"`
 	FeeRecipient  common.Address  `json:"feeRecipient"`
@@ -231,10 +267,16 @@ type ExecutionPayload struct {
 	BlobGasUsed *Uint64Quantity `json:"blobGasUsed,omitempty"`
 	// Nil if not present (Bedrock, Canyon, Delta)
 	ExcessBlobGas *Uint64Quantity `json:"excessBlobGas,omitempty"`
+	// Nil if not present (Bedrock, Canyon, Delta, Ecotone, Fjord, Granite, Holocene)
+	WithdrawalsRoot *common.Hash `json:"withdrawalsRoot,omitempty"`
 }
 
 func (payload *ExecutionPayload) ID() BlockID {
 	return BlockID{Hash: payload.BlockHash, Number: uint64(payload.BlockNumber)}
+}
+
+func (payload *ExecutionPayload) String() string {
+	return fmt.Sprintf("payload(%s)", payload.ID())
 }
 
 func (payload *ExecutionPayload) ParentID() BlockID {
@@ -245,15 +287,20 @@ func (payload *ExecutionPayload) ParentID() BlockID {
 	return BlockID{Hash: payload.ParentHash, Number: n}
 }
 
+func (payload *ExecutionPayload) BlockRef() BlockRef {
+	return BlockRef{
+		Hash:       payload.BlockHash,
+		Number:     uint64(payload.BlockNumber),
+		ParentHash: payload.ParentHash,
+		Time:       uint64(payload.Timestamp),
+	}
+}
+
 type rawTransactions []Data
 
 func (s rawTransactions) Len() int { return len(s) }
 func (s rawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(s[i])
-}
-
-func (payload *ExecutionPayload) CanyonBlock() bool {
-	return payload.Withdrawals != nil
 }
 
 // CheckBlockHash recomputes the block hash and returns if the embedded block hash matches.
@@ -280,10 +327,16 @@ func (envelope *ExecutionPayloadEnvelope) CheckBlockHash() (actual common.Hash, 
 		MixDigest:        common.Hash(payload.PrevRandao),
 		Nonce:            types.BlockNonce{}, // zeroed, proof-of-work legacy
 		BaseFee:          (*uint256.Int)(&payload.BaseFeePerGas).ToBig(),
+		WithdrawalsHash:  nil, // set below
+		BlobGasUsed:      (*uint64)(payload.BlobGasUsed),
+		ExcessBlobGas:    (*uint64)(payload.ExcessBlobGas),
 		ParentBeaconRoot: envelope.ParentBeaconBlockRoot,
 	}
 
-	if payload.CanyonBlock() {
+	if payload.WithdrawalsRoot != nil { // Isthmus
+		header.WithdrawalsHash = payload.WithdrawalsRoot
+		header.RequestsHash = &types.EmptyRequestsHash
+	} else if payload.Withdrawals != nil { // Canyon
 		withdrawalHash := types.DeriveSha(*payload.Withdrawals, hasher)
 		header.WithdrawalsHash = &withdrawalHash
 	}
@@ -292,7 +345,7 @@ func (envelope *ExecutionPayloadEnvelope) CheckBlockHash() (actual common.Hash, 
 	return blockHash, blockHash == payload.BlockHash
 }
 
-func BlockAsPayload(bl *types.Block, shanghaiTime *uint64) (*ExecutionPayload, error) {
+func BlockAsPayload(bl *types.Block, config *params.ChainConfig) (*ExecutionPayload, error) {
 	baseFee, overflow := uint256.FromBig(bl.BaseFee())
 	if overflow {
 		return nil, fmt.Errorf("invalid base fee in block: %s", bl.BaseFee())
@@ -304,6 +357,9 @@ func BlockAsPayload(bl *types.Block, shanghaiTime *uint64) (*ExecutionPayload, e
 			return nil, fmt.Errorf("tx %d failed to marshal: %w", i, err)
 		}
 		opaqueTxs[i] = otx
+	}
+	if baseFee == nil {
+		return nil, fmt.Errorf("base fee was nil")
 	}
 
 	payload := &ExecutionPayload{
@@ -323,17 +379,22 @@ func BlockAsPayload(bl *types.Block, shanghaiTime *uint64) (*ExecutionPayload, e
 		Transactions:  opaqueTxs,
 		ExcessBlobGas: (*Uint64Quantity)(bl.ExcessBlobGas()),
 		BlobGasUsed:   (*Uint64Quantity)(bl.BlobGasUsed()),
+		// WithdrawalsRoot is only set starting at Isthmus
 	}
 
-	if shanghaiTime != nil && uint64(payload.Timestamp) >= *shanghaiTime {
+	if config.ShanghaiTime != nil && uint64(payload.Timestamp) >= *config.ShanghaiTime {
 		payload.Withdrawals = &types.Withdrawals{}
+	}
+
+	if config.IsthmusTime != nil && uint64(payload.Timestamp) >= *config.IsthmusTime {
+		payload.WithdrawalsRoot = bl.Header().WithdrawalsHash
 	}
 
 	return payload, nil
 }
 
-func BlockAsPayloadEnv(bl *types.Block, shanghaiTime *uint64) (*ExecutionPayloadEnvelope, error) {
-	payload, err := BlockAsPayload(bl, shanghaiTime)
+func BlockAsPayloadEnv(bl *types.Block, config *params.ChainConfig) (*ExecutionPayloadEnvelope, error) {
+	payload, err := BlockAsPayload(bl, config)
 	if err != nil {
 		return nil, err
 	}
@@ -455,6 +516,8 @@ type SystemConfig struct {
 	// value will be 0 if Holocene is not active, or if derivation has yet to
 	// process any EIP_1559_PARAMS system config update events.
 	EIP1559Params Bytes8 `json:"eip1559Params"`
+	// OperatorFeeParams identifies the operator fee parameters.
+	OperatorFeeParams Bytes32 `json:"operatorFeeParams"`
 	// More fields can be added for future SystemConfig versions.
 
 	// MarshalPreHolocene indicates whether or not this struct should be
@@ -565,6 +628,31 @@ func CheckEcotoneL1SystemConfigScalar(scalar [32]byte) error {
 	}
 }
 
+type OperatorFeeParams struct {
+	Scalar   uint32
+	Constant uint64
+}
+
+func (sysCfg *SystemConfig) OperatorFee() OperatorFeeParams {
+	return DecodeOperatorFeeParams(sysCfg.OperatorFeeParams)
+}
+
+// DecodeScalar decodes the operatorFeeScalar and operatorFeeConstant from a 32-byte scalar value.
+// It uses the first byte to determine the scalar format.
+func DecodeOperatorFeeParams(scalar [32]byte) OperatorFeeParams {
+	return OperatorFeeParams{
+		Scalar:   binary.BigEndian.Uint32(scalar[20:24]),
+		Constant: binary.BigEndian.Uint64(scalar[24:32]),
+	}
+}
+
+// EncodeOperatorFeeParams encodes the OperatorFeeParams into a 32-byte value
+func EncodeOperatorFeeParams(params OperatorFeeParams) (scalar [32]byte) {
+	binary.BigEndian.PutUint32(scalar[20:24], params.Scalar)
+	binary.BigEndian.PutUint64(scalar[24:32], params.Constant)
+	return
+}
+
 type Bytes48 [48]byte
 
 func (b *Bytes48) UnmarshalJSON(text []byte) error {
@@ -615,7 +703,43 @@ const (
 
 	NewPayloadV2 EngineAPIMethod = "engine_newPayloadV2"
 	NewPayloadV3 EngineAPIMethod = "engine_newPayloadV3"
+	NewPayloadV4 EngineAPIMethod = "engine_newPayloadV4"
 
 	GetPayloadV2 EngineAPIMethod = "engine_getPayloadV2"
 	GetPayloadV3 EngineAPIMethod = "engine_getPayloadV3"
+	GetPayloadV4 EngineAPIMethod = "engine_getPayloadV4"
 )
+
+// StorageKey is a marshaling utility for hex-encoded storage keys, which can have leading 0s and are
+// an arbitrary length.
+type StorageKey []byte
+
+func (k *StorageKey) UnmarshalText(text []byte) error {
+	textString := string(text)
+
+	if len(textString)%2 != 0 {
+		// add leading 0 if odd length
+		if strings.HasPrefix(textString, "0x") {
+			textString = textString[:2] + "0" + textString[2:]
+		} else {
+			textString = "0" + textString
+		}
+	}
+
+	// decode hex string
+	b, err := hexutil.Decode(textString)
+	if err != nil {
+		return err
+	}
+
+	*k = b
+	return nil
+}
+
+func (k StorageKey) MarshalText() ([]byte, error) {
+	return []byte(hexutil.Encode(k)), nil
+}
+
+func (k StorageKey) String() string {
+	return hexutil.Encode(k)
+}

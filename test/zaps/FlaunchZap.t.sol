@@ -8,6 +8,7 @@ import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 
 import {FlaunchZap} from '@flaunch/zaps/FlaunchZap.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
+import {FairLaunch} from '@flaunch/hooks/FairLaunch.sol';
 
 import {FlaunchTest} from 'test/FlaunchTest.sol';
 
@@ -26,7 +27,7 @@ contract FlaunchZapTest is FlaunchTest {
 
     /**
      * This test fuzzes as many relevant factors as possible and then validates based on the
-     * expdected user journey. The only variables fuzzed will be those that affect zap
+     * expected user journey. The only variables fuzzed will be those that affect zap
      * functionality. The other variables are tested in other suites.
      *
      * @param _initialTokenFairLaunch ..
@@ -72,6 +73,7 @@ contract FlaunchZapTest is FlaunchTest {
                 symbol: 'ZAP',
                 tokenUri: 'ipfs://123',
                 initialTokenFairLaunch: _initialTokenFairLaunch,
+                fairLaunchDuration: 0,
                 premineAmount: _premineAmount,
                 creator: _creator,
                 creatorFeeAllocation: 80_00,
@@ -93,7 +95,8 @@ contract FlaunchZapTest is FlaunchTest {
             }),
             _treasuryManagerParams: FlaunchZap.TreasuryManagerParams({
                 manager: _manager,
-                data: abi.encode('')
+                initializeData: abi.encode(''),
+                depositData: abi.encode('')
             })
         });
 
@@ -147,6 +150,62 @@ contract FlaunchZapTest is FlaunchTest {
         {
             assertEq(payable(address(this)).balance, 1000e27 - ethSpent_);
         }
+    }
+
+    function test_CanScheduleFlaunchAndPremine(
+        uint _initialTokenFairLaunch,
+        uint _premineAmount,
+        address _creator,
+        uint _flaunchAt,
+        uint _initialPrice
+    ) public {
+        // Ensure that the creator is not a zero address, as this will revert
+        vm.assume(_creator != address(0));
+
+        // Ensure that our initial token supply is valid (InvalidInitialSupply)
+        vm.assume(_initialTokenFairLaunch <= flaunch.MAX_FAIR_LAUNCH_TOKENS());
+
+        // Ensure that our premine does not exceed the fair launch (PremineExceedsInitialAmount)
+        vm.assume(_premineAmount > 0 && _premineAmount <= _initialTokenFairLaunch);
+
+        // Ensure that our flaunch time is in the future
+        vm.assume(_flaunchAt > block.timestamp && _flaunchAt <= block.timestamp + 30 days);
+
+        // Provide our user with enough FLETH to make the premine swap
+        deal(address(this), 2000e27);
+        flETH.deposit{value: 1000e27}();
+        flETH.approve(address(flaunchZap), 1000e27);
+
+        // Flaunch time baby!
+        (address memecoin_, uint ethSpent_, ) = flaunchZap.flaunch{value: 1000e27}({
+            _flaunchParams: PositionManager.FlaunchParams({
+                name: 'FlaunchZap',
+                symbol: 'ZAP',
+                tokenUri: 'ipfs://123',
+                initialTokenFairLaunch: _initialTokenFairLaunch,
+                fairLaunchDuration: 30 minutes,
+                premineAmount: _premineAmount,
+                creator: _creator,
+                creatorFeeAllocation: 80_00,
+                flaunchAt: _flaunchAt,
+                initialPriceParams: abi.encode(_initialPrice),
+                feeCalculatorParams: abi.encode('')
+            })
+        });
+
+        // Check our refunded ETH
+        assertEq(payable(address(this)).balance, 1000e27 - ethSpent_);
+
+        // Jump when in Fair Launch
+        vm.warp(_flaunchAt + 1);
+
+        // Check the Fair Launch status
+        PoolId poolId = positionManager.poolKey(memecoin_).toId();
+        // assertEq(fairLaunch.inFairLaunchWindow(poolId), true);
+
+        // Check Fair Launch allocation
+        FairLaunch.FairLaunchInfo memory fairLaunchInfo = fairLaunch.fairLaunchInfo(poolId);
+        assertEq(fairLaunchInfo.supply, _initialTokenFairLaunch - _premineAmount);
     }
 
     function test_CanCalculateFees() public {

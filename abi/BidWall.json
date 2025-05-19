@@ -36,19 +36,6 @@
     },
     {
       "type": "function",
-      "name": "STALE_TIME_WINDOW",
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "",
-          "type": "uint256",
-          "internalType": "uint256"
-        }
-      ],
-      "stateMutability": "view"
-    },
-    {
-      "type": "function",
       "name": "cancelOwnershipHandover",
       "inputs": [],
       "outputs": [],
@@ -539,6 +526,19 @@
     },
     {
       "type": "function",
+      "name": "setStaleTimeWindow",
+      "inputs": [
+        {
+          "name": "_staleTimeWindow",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "setSwapFeeThreshold",
       "inputs": [
         {
@@ -549,6 +549,19 @@
       ],
       "outputs": [],
       "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "staleTimeWindow",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -867,6 +880,19 @@
           "type": "address",
           "indexed": true,
           "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "StaleTimeWindowUpdated",
+      "inputs": [
+        {
+          "name": "_staleTimeWindow",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
         }
       ],
       "anonymous": false

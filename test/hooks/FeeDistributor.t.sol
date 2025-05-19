@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import 'forge-std/console.sol';
-
 import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
@@ -13,11 +11,13 @@ import {Currency} from '@uniswap/v4-core/src/types/Currency.sol';
 
 import {BidWall} from '@flaunch/bidwall/BidWall.sol';
 import {FeeDistributor} from '@flaunch/hooks/FeeDistributor.sol';
+import {FeeEscrow} from '@flaunch/escrows/FeeEscrow.sol';
 import {FeeExemptions} from '@flaunch/hooks/FeeExemptions.sol';
 import {InternalSwapPool} from '@flaunch/hooks/InternalSwapPool.sol';
 import {PoolSwap} from '@flaunch/zaps/PoolSwap.sol';
 import {PositionManager} from '@flaunch/PositionManager.sol';
 
+import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
 
 import {PoolManagerMock} from '../mocks/PoolManagerMock.sol';
 import {FlaunchTest} from '../FlaunchTest.sol';
@@ -38,7 +38,7 @@ contract FeeDistributorTest is FlaunchTest {
         _deployPlatform();
 
         // Create our memecoin
-        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 20_00, 0, abi.encode(''), abi.encode(1_000)));
+        memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 20_00, 0, abi.encode(''), abi.encode(1_000)));
 
         // Reference our `_poolKey` for later tests
         _poolKey = positionManager.poolKey(memecoin);
@@ -259,21 +259,21 @@ contract FeeDistributorTest is FlaunchTest {
 
         // Allocate the fees to the recipient, confirming that our event is fired
         vm.expectEmit();
-        emit FeeDistributor.Deposit(_poolKey.toId(), _sender, positionManager.getNativeToken(), _amount);
-        positionManager.allocateFeesMock(_poolKey.toId(), _sender, _amount);
+        emit FeeEscrow.Deposit(_poolKey.toId(), _sender, positionManager.getNativeToken(), _amount);
+        _allocateFees(_poolKey.toId(), _sender, _amount);
 
         // Allocate additional fees
         vm.expectEmit();
-        emit FeeDistributor.Deposit(_poolKey.toId(), _sender, positionManager.getNativeToken(), _amount);
-        positionManager.allocateFeesMock(_poolKey.toId(), _sender, _amount);
+        emit FeeEscrow.Deposit(_poolKey.toId(), _sender, positionManager.getNativeToken(), _amount);
+        _allocateFees(_poolKey.toId(), _sender, _amount);
 
         vm.startPrank(_sender);
 
         // Withdraw the fees for our recipient, confirming our event is fired and that
         // they have successfully received their token.
         vm.expectEmit();
-        emit FeeDistributor.Withdrawal(_sender, _recipient, (_unwrap) ? address(0) : positionManager.getNativeToken(), _amount * 2);
-        positionManager.withdrawFees(_recipient, _unwrap);
+        emit FeeEscrow.Withdrawal(_sender, _recipient, (_unwrap) ? address(0) : positionManager.getNativeToken(), _amount * 2);
+        positionManager.feeEscrow().withdrawFees(_recipient, _unwrap);
 
         if (_unwrap) {
             assertEq(payable(_recipient).balance, _amount * 2, 'Invalid recipient ETH');
@@ -287,15 +287,15 @@ contract FeeDistributorTest is FlaunchTest {
     function test_CanAllocateAndWithdrawFeesWithZeroAmount(bool _unwrap) public {
         address recipient = makeAddr('test_CanAllocateAndWithdrawFeesWithZeroAmount');
 
-        positionManager.allocateFeesMock(_poolKey.toId(), recipient, 0);
-        positionManager.withdrawFees(recipient, _unwrap);
+        _allocateFees(_poolKey.toId(), recipient, 0);
+        positionManager.feeEscrow().withdrawFees(recipient, _unwrap);
         assertEq(IERC20(positionManager.getNativeToken()).balanceOf(recipient), 0);
         assertEq(payable(recipient).balance, 0);
     }
 
     function test_CannotAllocateFeesToZeroAddress() external {
-        vm.expectRevert(FeeDistributor.RecipientZeroAddress.selector);
-        positionManager.allocateFeesMock(_poolKey.toId(), address(0), 1);
+        vm.expectRevert(FeeEscrow.RecipientZeroAddress.selector);
+        _allocateFees(_poolKey.toId(), address(0), 1);
     }
 
     function test_CanCaptureSwapFees_ZeroForOne_ExactInput(address _referrer) public {
@@ -660,8 +660,21 @@ contract FeeDistributorTest is FlaunchTest {
     }
 
     function test_CanDistributeFeesWithBurnedCreatorToken() public {
+        uint tokenId = flaunch.tokenId(memecoin);
+
+        // Confirm our initial ownership
+        assertEq(flaunch.ownerOf(tokenId), address(this));
+        assertEq(IMemecoin(memecoin).creator(), address(this));
+
         // Burn the token
-        flaunch.burn(flaunch.tokenId(memecoin));
+        flaunch.burn(tokenId);
+
+        // Confirm our expected ERC721 responses. The owner should revert as is expected, but
+        // our creator call should handle this and instead just return a zero address.
+        vm.expectRevert();
+        flaunch.ownerOf(tokenId);
+
+        assertEq(IMemecoin(memecoin).creator(), address(0));
 
         // Prevent BidWall.deposit, as this will require the PositionManager to be unlocked
         vm.mockCall(
@@ -732,6 +745,10 @@ contract FeeDistributorTest is FlaunchTest {
             }),
             _referrer
         );
+    }
+
+    function _allocateFees(PoolId _poolId, address _sender, uint _amount) internal {
+        feeEscrow.allocateFees(_poolId, _sender, _amount);
     }
 
     function _validFeeDistributionMatrix(uint24 _bidWall, uint24 _creator, uint24 _protocol) internal pure returns (uint24[] memory feeDisibution_) {

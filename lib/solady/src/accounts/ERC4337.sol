@@ -51,13 +51,6 @@ abstract contract ERC4337 is Ownable, UUPSUpgradeable, Receiver, ERC1271 {
     }
 
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-    /*                       CUSTOM ERRORS                        */
-    /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
-
-    /// @dev The function selector is not recognized.
-    error FnSelectorNotRecognized();
-
-    /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
     /*                        CONSTRUCTOR                         */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
@@ -324,7 +317,7 @@ abstract contract ERC4337 is Ownable, UUPSUpgradeable, Receiver, ERC1271 {
         }
     }
 
-    /// @dev Ensures that the `storageSlot` is not prohibited for direct storage writes.
+    /// @dev Ensures that the `storageSlot` is prohibited for direct storage writes.
     /// You can override this modifier to ensure the sanctity of other storage slots too.
     modifier storageStoreGuard(bytes32 storageSlot) virtual {
         /// @solidity memory-safe-assembly
@@ -363,7 +356,7 @@ abstract contract ERC4337 is Ownable, UUPSUpgradeable, Receiver, ERC1271 {
         address ep = entryPoint();
         /// @solidity memory-safe-assembly
         assembly {
-            // The EntryPoint has balance accounting logic in the `receive()` function.
+            // The EntryPoint has balance accounting logic in the `receive()` function, as defined in ERC-4337.
             // forgefmt: disable-next-item
             if iszero(mul(extcodesize(ep), call(gas(), ep, callvalue(), codesize(), 0x00, codesize(), 0x00))) {
                 revert(codesize(), 0x00) // For gas estimation.
@@ -405,6 +398,12 @@ abstract contract ERC4337 is Ownable, UUPSUpgradeable, Receiver, ERC1271 {
     /// @dev Uses the `owner` as the ERC1271 signer.
     function _erc1271Signer() internal view virtual override(ERC1271) returns (address) {
         return owner();
+    }
+
+    /// @dev Allow the entry point to skip the ERC7739 nested typed data workflow.
+    /// This is safe as the entry point already includes the smart account in the user op digest.
+    function _erc1271CallerIsSafe() internal view virtual override(ERC1271) returns (bool) {
+        return msg.sender == entryPoint() || ERC1271._erc1271CallerIsSafe();
     }
 
     /// @dev To ensure that only the owner or the account itself can upgrade the implementation.

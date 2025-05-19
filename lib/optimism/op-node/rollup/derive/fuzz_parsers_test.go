@@ -65,7 +65,6 @@ func FuzzL1InfoBedrockRoundTrip(f *testing.F) {
 		if !cmp.Equal(in, out, cmp.Comparer(testutils.BigEqual)) {
 			t.Fatalf("The data did not round trip correctly. in: %v. out: %v", in, out)
 		}
-
 	})
 }
 
@@ -94,18 +93,9 @@ func FuzzL1InfoEcotoneRoundTrip(f *testing.F) {
 		if !cmp.Equal(in, out, cmp.Comparer(testutils.BigEqual)) {
 			t.Fatalf("The Ecotone data did not round trip correctly. in: %v. out: %v", in, out)
 		}
-		enc, err = in.marshalBinaryInterop()
-		if err != nil {
-			t.Fatalf("Failed to marshal Interop binary: %v", err)
-		}
-		err = out.unmarshalBinaryInterop(enc)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal Interop binary: %v", err)
-		}
 		if !cmp.Equal(in, out, cmp.Comparer(testutils.BigEqual)) {
 			t.Fatalf("The Interop data did not round trip correctly. in: %v. out: %v", in, out)
 		}
-
 	})
 }
 
@@ -171,7 +161,6 @@ func FuzzL1InfoBedrockAgainstContract(f *testing.F) {
 		if !cmp.Equal(expected, actual, cmp.Comparer(testutils.BigEqual)) {
 			t.Fatalf("The data did not round trip correctly. expected: %v. actual: %v", expected, actual)
 		}
-
 	})
 }
 
@@ -255,7 +244,7 @@ func FuzzUnmarshallLogEvent(f *testing.F) {
 	})
 	require.NoError(f, err)
 
-	_, err = state.Commit(0, false)
+	_, err = state.Commit(0, false, false)
 	require.NoError(f, err)
 
 	portalContract, err := bindings.NewOptimismPortal(addr, nil)

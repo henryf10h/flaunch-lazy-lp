@@ -109,10 +109,10 @@
     },
     {
       "type": "function",
-      "name": "setPositionManager",
+      "name": "setFeeEscrow",
       "inputs": [
         {
-          "name": "_positionManager",
+          "name": "_feeEscrow",
           "type": "address",
           "internalType": "address"
         },
@@ -137,6 +137,25 @@
       ],
       "outputs": [],
       "stateMutability": "payable"
+    },
+    {
+      "type": "event",
+      "name": "FeeEscrowUpdated",
+      "inputs": [
+        {
+          "name": "_feeEscrow",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "_enabled",
+          "type": "bool",
+          "indexed": false,
+          "internalType": "bool"
+        }
+      ],
+      "anonymous": false
     },
     {
       "type": "event",
@@ -179,25 +198,6 @@
           "type": "address",
           "indexed": true,
           "internalType": "address"
-        }
-      ],
-      "anonymous": false
-    },
-    {
-      "type": "event",
-      "name": "PositionManagerUpdated",
-      "inputs": [
-        {
-          "name": "_positionManager",
-          "type": "address",
-          "indexed": false,
-          "internalType": "address"
-        },
-        {
-          "name": "_enabled",
-          "type": "bool",
-          "indexed": false,
-          "internalType": "bool"
         }
       ],
       "anonymous": false

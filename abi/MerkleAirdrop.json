@@ -653,6 +653,11 @@
     },
     {
       "type": "error",
+      "name": "AirdropExpired",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "AirdropInProgress",
       "inputs": []
     },

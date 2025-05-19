@@ -13,6 +13,7 @@
 [submodule "lib/v4-periphery"]
 	path = lib/v4-periphery
 	url = https://github.com/Uniswap/v4-periphery
+	commit = 04263e9a7a8f9e9ddae0e703315f5ccd2ecb8a97
 [submodule "lib/vulcan"]
 	path = lib/vulcan
 	url = https://github.com/nomoixyz/vulcan

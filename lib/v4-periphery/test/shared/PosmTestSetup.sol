@@ -8,14 +8,13 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
-import {PositionManager} from "../../src/PositionManager.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {LiquidityOperations} from "./LiquidityOperations.sol";
 import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 import {DeployPermit2} from "permit2/test/utils/DeployPermit2.sol";
 import {HookSavesDelta} from "./HookSavesDelta.sol";
 import {HookModifyLiquidities} from "./HookModifyLiquidities.sol";
-import {PositionDescriptor} from "../../src/PositionDescriptor.sol";
+import {Deploy, IPositionDescriptor} from "./Deploy.sol";
 import {ERC721PermitHash} from "../../src/libraries/ERC721PermitHash.sol";
 import {IWETH9} from "../../src/interfaces/external/IWETH9.sol";
 import {WETH} from "solmate/src/tokens/WETH.sol";
@@ -23,16 +22,23 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {SortTokens} from "@uniswap/v4-core/test/utils/SortTokens.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {PositionConfig} from "../shared/PositionConfig.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 /// @notice A shared test contract that wraps the v4-core deployers contract and exposes basic liquidity operations on posm.
 contract PosmTestSetup is Test, Deployers, DeployPermit2, LiquidityOperations {
     uint256 constant STARTING_USER_BALANCE = 10_000_000 ether;
 
     IAllowanceTransfer permit2;
-    PositionDescriptor public positionDescriptor;
+    IPositionDescriptor public positionDescriptor;
+    TransparentUpgradeableProxy proxy;
+    IPositionDescriptor proxyAsImplementation;
     HookSavesDelta hook;
     address hookAddr = address(uint160(Hooks.AFTER_ADD_LIQUIDITY_FLAG | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG));
-    IWETH9 public _WETH9 = IWETH9(address(new WETH()));
+
+    WETH wethImpl = new WETH();
+    IWETH9 public _WETH9;
+
+    address governance = address(0xABCD);
 
     HookModifyLiquidities hookModifyLiquidities;
     address hookModifyLiquiditiesAddr = address(
@@ -68,8 +74,23 @@ contract PosmTestSetup is Test, Deployers, DeployPermit2, LiquidityOperations {
     function deployPosm(IPoolManager poolManager) internal {
         // We use deployPermit2() to prevent having to use via-ir in this repository.
         permit2 = IAllowanceTransfer(deployPermit2());
-        positionDescriptor = new PositionDescriptor(poolManager, 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2, "ETH");
-        lpm = new PositionManager(poolManager, permit2, 100_000, positionDescriptor, _WETH9);
+        _WETH9 = deployWETH();
+        proxyAsImplementation = deployDescriptor(poolManager, "ETH");
+        lpm = Deploy.positionManager(
+            address(poolManager), address(permit2), 100_000, address(proxyAsImplementation), address(_WETH9), hex"03"
+        );
+    }
+
+    function deployWETH() internal returns (IWETH9) {
+        address wethAddr = makeAddr("WETH");
+        vm.etch(wethAddr, address(wethImpl).code);
+        return IWETH9(wethAddr);
+    }
+
+    function deployDescriptor(IPoolManager poolManager, bytes32 label) internal returns (IPositionDescriptor) {
+        positionDescriptor = Deploy.positionDescriptor(address(poolManager), address(_WETH9), label, hex"00");
+        proxy = Deploy.transparentUpgradeableProxy(address(positionDescriptor), governance, "", hex"03");
+        return IPositionDescriptor(address(proxy));
     }
 
     function seedBalance(address to) internal {
@@ -103,11 +124,18 @@ contract PosmTestSetup is Test, Deployers, DeployPermit2, LiquidityOperations {
         _WETH9.transfer(to, STARTING_USER_BALANCE);
     }
 
-    function initWethPool(Currency currencyB, IHooks hooks, uint24 fee, uint160 sqrtPriceX96) internal {
-        (Currency _currency0, Currency _currency1) =
-            SortTokens.sort(MockERC20(address(_WETH9)), MockERC20(Currency.unwrap(currencyB)));
+    function seedToken(MockERC20 token, address to) internal {
+        token.mint(to, STARTING_USER_BALANCE);
+    }
 
-        (wethKey,) = initPool(_currency0, _currency1, hooks, fee, sqrtPriceX96);
+    function initPoolUnsorted(Currency currencyA, Currency currencyB, IHooks hooks, uint24 fee, uint160 sqrtPriceX96)
+        internal
+        returns (PoolKey memory poolKey)
+    {
+        (Currency _currency0, Currency _currency1) =
+            SortTokens.sort(MockERC20(Currency.unwrap(currencyA)), MockERC20(Currency.unwrap(currencyB)));
+
+        (poolKey,) = initPool(_currency0, _currency1, hooks, fee, sqrtPriceX96);
     }
 
     function permit(uint256 privateKey, uint256 tokenId, address operator, uint256 nonce) internal {

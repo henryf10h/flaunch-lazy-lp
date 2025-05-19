@@ -36,7 +36,7 @@ contract BuyBackAndBurnFlayTest is FlaunchTest {
         _deployPlatform();
 
         // Create our memecoin
-        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
         memecoin = MemecoinMock(_memecoin);
 
         uint tokenId = flaunch.tokenId(_memecoin);

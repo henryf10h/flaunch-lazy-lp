@@ -83,11 +83,13 @@ contract FlaunchZap {
      * the flaunch token will be transferred directly to the manager.
      *
      * @param manager The manager implementation to use
-     * @param data The data to initialize the manager with
+     * @param initializeData The data to initialize the manager with
+     * @param depositData The data to deposit to the manager with
      */
     struct TreasuryManagerParams {
         address manager;
-        bytes data;
+        bytes initializeData;
+        bytes depositData;
     }
 
     /**
@@ -256,19 +258,34 @@ contract FlaunchZap {
         // Send the flaunch token to the manager
         if (treasuryManagerFactory.approvedManagerImplementation(_treasuryManagerParams.manager)) {
             // If it is a valid manager implementation, deploy a new instance
-            deployedManager_ = treasuryManagerFactory.deployManager(_treasuryManagerParams.manager);
+            deployedManager_ = treasuryManagerFactory.deployAndInitializeManager({
+                _managerImplementation: _treasuryManagerParams.manager,
+                _owner: _creator,
+                _data: _treasuryManagerParams.initializeData
+            });
 
             // Approve the manager to pull the flaunch token during initialization
             flaunchContract.approve(deployedManager_, tokenId);
 
-            // Initialize the manager with the flaunched ERC721
-            ITreasuryManager(deployedManager_).initialize({
+            ITreasuryManager(deployedManager_).deposit({
                 _flaunchToken: ITreasuryManager.FlaunchToken({
                     flaunch: flaunchContract,
                     tokenId: tokenId
                 }),
-                _owner: _creator,
-                _data: _treasuryManagerParams.data
+                _creator: _creator,
+                _data: _treasuryManagerParams.depositData
+            });
+        } else if (treasuryManagerFactory.managerImplementation(_treasuryManagerParams.manager) != address(0)) {
+            // Approve the manager to pull the flaunch token during initialization
+            flaunchContract.approve(_treasuryManagerParams.manager, tokenId);
+
+            ITreasuryManager(_treasuryManagerParams.manager).deposit({
+                _flaunchToken: ITreasuryManager.FlaunchToken({
+                    flaunch: flaunchContract,
+                    tokenId: tokenId
+                }),
+                _creator: _creator,
+                _data: _treasuryManagerParams.depositData
             });
         } else {
             // If it's not a valid manager implementation, transfer the flaunch token directly

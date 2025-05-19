@@ -10,10 +10,12 @@
 package sources
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -22,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
+	"github.com/ethereum-optimism/optimism/op-service/apis"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/sources/caching"
@@ -45,6 +48,8 @@ type EthClientConfig struct {
 	// Number of payloads to cache
 	PayloadsCacheSize int
 
+	BlockRefsCacheSize int
+
 	// If the RPC is untrusted, then we should not use cached information from responses,
 	// and instead verify against the block-hash.
 	// Of real L1 blocks no deposits can be missed/faked, no batches can be missed/faked,
@@ -65,6 +70,25 @@ type EthClientConfig struct {
 	MethodResetDuration time.Duration
 }
 
+// DefaultEthClientConfig creates a new eth client config,
+// with caching of data using the given cache-size (in number of blocks).
+func DefaultEthClientConfig(cacheSize int) *EthClientConfig {
+	return &EthClientConfig{
+		// receipts and transactions are cached per block
+		ReceiptsCacheSize:     cacheSize,
+		TransactionsCacheSize: cacheSize,
+		HeadersCacheSize:      cacheSize,
+		PayloadsCacheSize:     cacheSize,
+		MaxRequestsPerBatch:   20,
+		MaxConcurrentRequests: 10,
+		BlockRefsCacheSize:    cacheSize,
+		TrustRPC:              false,
+		MustBePostMerge:       true,
+		RPCProviderKind:       RPCKindStandard,
+		MethodResetDuration:   time.Minute,
+	}
+}
+
 func (c *EthClientConfig) Check() error {
 	if c.ReceiptsCacheSize < 0 {
 		return fmt.Errorf("invalid receipts cache size: %d", c.ReceiptsCacheSize)
@@ -77,6 +101,9 @@ func (c *EthClientConfig) Check() error {
 	}
 	if c.PayloadsCacheSize < 0 {
 		return fmt.Errorf("invalid payloads cache size: %d", c.PayloadsCacheSize)
+	}
+	if c.BlockRefsCacheSize < 0 {
+		return fmt.Errorf("invalid blockrefs cache size: %d", c.BlockRefsCacheSize)
 	}
 	if c.MaxConcurrentRequests < 1 {
 		return fmt.Errorf("expected at least 1 concurrent request, but max is %d", c.MaxConcurrentRequests)
@@ -113,7 +140,13 @@ type EthClient struct {
 	// cache payloads by hash
 	// common.Hash -> *eth.ExecutionPayload
 	payloadsCache *caching.LRUCache[common.Hash, *eth.ExecutionPayloadEnvelope]
+
+	// cache BlockRef by hash
+	// common.Hash -> eth.BlockRef
+	blockRefsCache *caching.LRUCache[common.Hash, eth.BlockRef]
 }
+
+var _ apis.EthClient = (*EthClient)(nil)
 
 // NewEthClient returns an [EthClient], wrapping an RPC with bindings to fetch ethereum data with added error logging,
 // metric tracking, and caching. The [EthClient] uses a [LimitRPC] wrapper to limit the number of concurrent RPC requests.
@@ -136,6 +169,7 @@ func NewEthClient(client client.RPC, log log.Logger, metrics caching.Metrics, co
 		transactionsCache: caching.NewLRUCache[common.Hash, types.Transactions](metrics, "txs", config.TransactionsCacheSize),
 		headersCache:      caching.NewLRUCache[common.Hash, eth.BlockInfo](metrics, "headers", config.HeadersCacheSize),
 		payloadsCache:     caching.NewLRUCache[common.Hash, *eth.ExecutionPayloadEnvelope](metrics, "payloads", config.PayloadsCacheSize),
+		blockRefsCache:    caching.NewLRUCache[common.Hash, eth.L1BlockRef](metrics, "blockrefs", config.BlockRefsCacheSize),
 	}, nil
 }
 
@@ -143,7 +177,7 @@ func NewEthClient(client client.RPC, log log.Logger, metrics caching.Metrics, co
 func (s *EthClient) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
 	// Note that *types.Header does not cache the block hash unlike *HeaderInfo, it always recomputes.
 	// Inefficient if used poorly, but no trust issue.
-	return s.client.EthSubscribe(ctx, ch, "newHeads")
+	return s.client.Subscribe(ctx, "eth", ch, "newHeads")
 }
 
 // rpcBlockID is an internal type to enforce header and block call results match the requested identifier
@@ -315,11 +349,21 @@ func (s *EthClient) FetchReceipts(ctx context.Context, blockHash common.Hash) (e
 	return info, receipts, nil
 }
 
-// ExecutionWitness fetches execution witness data for a block number.
-func (s *EthClient) ExecutionWitness(ctx context.Context, blockNum uint64) (*eth.ExecutionWitness, error) {
+// TransactionReceipt returns a receipt associated with transaction.
+func (s *EthClient) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	var r *types.Receipt
+	err := s.client.CallContext(ctx, &r, "eth_getTransactionReceipt", txHash)
+	if err == nil && r == nil {
+		return nil, ethereum.NotFound
+	}
+	return r, err
+}
+
+// PayloadExecutionWitness generates a block from a payload and returns execution witness data.
+func (s *EthClient) PayloadExecutionWitness(ctx context.Context, parentHash common.Hash, payloadAttributes eth.PayloadAttributes) (*eth.ExecutionWitness, error) {
 	var witness *eth.ExecutionWitness
 
-	err := s.client.CallContext(ctx, &witness, "debug_executionWitness", hexutil.EncodeUint64(blockNum), true)
+	err := s.client.CallContext(ctx, &witness, "debug_executePayload", parentHash, payloadAttributes)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +391,7 @@ func (s *EthClient) GetProof(ctx context.Context, address common.Address, storag
 		return nil, fmt.Errorf("missing storage proof data, got %d proof entries but requested %d storage keys", len(getProofResponse.StorageProof), len(storage))
 	}
 	for i, key := range storage {
-		if key != common.BigToHash(getProofResponse.StorageProof[i].Key.ToInt()) {
+		if !bytes.Equal(key[:], getProofResponse.StorageProof[i].Key) {
 			return nil, fmt.Errorf("unexpected storage proof key difference for entry %d: got %s but requested %s", i, getProofResponse.StorageProof[i].Key.String(), key)
 		}
 	}
@@ -388,4 +432,129 @@ func (s *EthClient) ReadStorageAt(ctx context.Context, address common.Address, s
 
 func (s *EthClient) Close() {
 	s.client.Close()
+}
+
+// BlockRefByLabel returns the [eth.BlockRef] for the given block label.
+// Notice, we cannot cache a block reference by label because labels are not guaranteed to be unique.
+func (s *EthClient) BlockRefByLabel(ctx context.Context, label eth.BlockLabel) (eth.BlockRef, error) {
+	info, err := s.InfoByLabel(ctx, label)
+	if err != nil {
+		// Both geth and erigon like to serve non-standard errors for the safe and finalized heads, correct that.
+		// This happens when the chain just started and nothing is marked as safe/finalized yet.
+		if strings.Contains(err.Error(), "block not found") || strings.Contains(err.Error(), "Unknown block") {
+			err = ethereum.NotFound
+		}
+		return eth.L1BlockRef{}, fmt.Errorf("failed to fetch head header: %w", err)
+	}
+	ref := eth.InfoToL1BlockRef(info)
+	s.blockRefsCache.Add(ref.Hash, ref)
+	return ref, nil
+}
+
+// BlockRefByNumber returns an [eth.BlockRef] for the given block number.
+// Notice, we cannot cache a block reference by number because L1 re-orgs can invalidate the cached block reference.
+func (s *EthClient) BlockRefByNumber(ctx context.Context, num uint64) (eth.BlockRef, error) {
+	info, err := s.InfoByNumber(ctx, num)
+	if err != nil {
+		return eth.L1BlockRef{}, fmt.Errorf("failed to fetch header by num %d: %w", num, err)
+	}
+	ref := eth.InfoToL1BlockRef(info)
+	s.blockRefsCache.Add(ref.Hash, ref)
+	return ref, nil
+}
+
+// BlockRefByHash returns the [eth.BlockRef] for the given block hash.
+// We cache the block reference by hash as it is safe to assume collision will not occur.
+func (s *EthClient) BlockRefByHash(ctx context.Context, hash common.Hash) (eth.BlockRef, error) {
+	if v, ok := s.blockRefsCache.Get(hash); ok {
+		return v, nil
+	}
+	info, err := s.InfoByHash(ctx, hash)
+	if err != nil {
+		return eth.BlockRef{}, fmt.Errorf("failed to fetch header by hash %v: %w", hash, err)
+	}
+	ref := eth.InfoToL1BlockRef(info)
+	s.blockRefsCache.Add(ref.Hash, ref)
+	return ref, nil
+}
+
+func ToCallArg(msg ethereum.CallMsg) interface{} {
+	arg := map[string]interface{}{
+		"from": msg.From,
+		"to":   msg.To,
+	}
+	if len(msg.Data) > 0 {
+		arg["data"] = hexutil.Bytes(msg.Data)
+	}
+	if msg.Value != nil {
+		arg["value"] = (*hexutil.Big)(msg.Value)
+	}
+	if msg.Gas != 0 {
+		arg["gas"] = hexutil.Uint64(msg.Gas)
+	}
+	if msg.GasPrice != nil {
+		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice)
+	}
+	if msg.AccessList != nil {
+		arg["accessList"] = msg.AccessList
+	}
+	return arg
+}
+
+// SuggestGasPrice retrieves the currently suggested gas price to allow a timely
+// execution of a transaction.
+func (s *EthClient) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	var hex hexutil.Big
+	if err := s.client.CallContext(ctx, &hex, "eth_gasPrice"); err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&hex), nil
+}
+
+// Call executes a message call transaction but never mined into the blockchain.
+func (s *EthClient) Call(ctx context.Context, msg ethereum.CallMsg) ([]byte, error) {
+	var hex hexutil.Bytes
+	err := s.client.CallContext(ctx, &hex, "eth_call", ToCallArg(msg), "pending")
+	if err != nil {
+		return nil, err
+	}
+	return hex, nil
+}
+
+// EstimateGas tries to estimate the gas needed to execute a specific transaction.
+func (s *EthClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	var hex hexutil.Uint64
+	err := s.client.CallContext(ctx, &hex, "eth_estimateGas", ToCallArg(msg))
+	if err != nil {
+		return 0, err
+	}
+	return uint64(hex), nil
+}
+
+// SendTransaction submits a signed transaction.
+func (s *EthClient) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+	data, err := tx.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	return s.client.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data))
+}
+
+// PendingNonceAt returns the account nonce of the given account in the pending state.
+func (s *EthClient) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
+	var result hexutil.Uint64
+	err := s.client.CallContext(ctx, &result, "eth_getTransactionCount", account, "pending")
+	return uint64(result), err
+}
+
+// BalanceAt returns the wei balance of the given account.
+func (s *EthClient) BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error) {
+	var result hexutil.Big
+	var err error
+	if blockNumber != nil {
+		err = s.client.CallContext(ctx, &result, "eth_getBalance", account, blockNumber)
+	} else {
+		err = s.client.CallContext(ctx, &result, "eth_getBalance", account, "latest")
+	}
+	return (*big.Int)(&result), err
 }

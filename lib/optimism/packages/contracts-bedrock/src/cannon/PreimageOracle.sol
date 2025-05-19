@@ -6,7 +6,6 @@ import { LibKeccak } from "@lib-keccak/LibKeccak.sol";
 import { PreimageKeyLib } from "src/cannon/PreimageKeyLib.sol";
 import {
     PartOffsetOOB,
-    NotEnoughGas,
     InvalidProof,
     InvalidPreimage,
     InvalidInputSize,
@@ -26,7 +25,7 @@ import {
 import { LPPMetaData } from "src/cannon/libraries/CannonTypes.sol";
 
 // Interfaces
-import { ISemver } from "src/universal/interfaces/ISemver.sol";
+import { ISemver } from "interfaces/universal/ISemver.sol";
 
 /// @title PreimageOracle
 /// @notice A contract for storing permissioned pre-images.
@@ -51,8 +50,8 @@ contract PreimageOracle is ISemver {
     uint256 public constant PRECOMPILE_CALL_RESERVED_GAS = 100_000;
 
     /// @notice The semantic version of the Preimage Oracle contract.
-    /// @custom:semver 1.1.3-beta.6
-    string public constant version = "1.1.3-beta.6";
+    /// @custom:semver 1.1.4
+    string public constant version = "1.1.4";
 
     ////////////////////////////////////////////////////////////////
     //                 Authorized Preimage Parts                  //
@@ -505,7 +504,9 @@ contract PreimageOracle is ISemver {
         // The bond provided must be at least `MIN_BOND_SIZE`.
         if (msg.value < MIN_BOND_SIZE) revert InsufficientBond();
 
-        // The caller of `addLeavesLPP` must be an EOA, so that the call inputs are always available in block bodies.
+        // Legacy check, no longer technically required but keeping for now. Can be bypassed using
+        // EIP-7702. Challenger loads this information directly from the proposals array instead of
+        // looking at transaction calldata.
         if (msg.sender != tx.origin) revert NotEOA();
 
         // The part offset must be within the bounds of the claimed size + 8.
@@ -550,9 +551,9 @@ contract PreimageOracle is ISemver {
         LPPMetaData metaData = proposalMetadata[msg.sender][_uuid];
         uint256 blocksProcessed = metaData.blocksProcessed();
 
-        // The caller of `addLeavesLPP` must be an EOA.
-        // Note: This check may break if EIPs like EIP-3074 are introduced. We may query the data in the logs if this
-        // is the case.
+        // Legacy check, no longer technically required but keeping for now. Can be bypassed using
+        // EIP-7702. Challenger loads this information from the log at the end of this function
+        // instead of looking at transaction calldata.
         if (msg.sender != tx.origin) revert NotEOA();
 
         // Revert if the proposal has not been initialized. 0-size preimages are *not* allowed.

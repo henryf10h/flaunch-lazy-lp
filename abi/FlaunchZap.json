@@ -117,6 +117,11 @@
               "internalType": "uint256"
             },
             {
+              "name": "fairLaunchDuration",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
               "name": "premineAmount",
               "type": "uint256",
               "internalType": "uint256"
@@ -194,6 +199,11 @@
             },
             {
               "name": "initialTokenFairLaunch",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "fairLaunchDuration",
               "type": "uint256",
               "internalType": "uint256"
             },
@@ -294,7 +304,12 @@
               "internalType": "address"
             },
             {
-              "name": "data",
+              "name": "initializeData",
+              "type": "bytes",
+              "internalType": "bytes"
+            },
+            {
+              "name": "depositData",
               "type": "bytes",
               "internalType": "bytes"
             }

@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IL2ToL2CrossDomainMessenger} from "@optimism/L2/interfaces/IL2ToL2CrossDomainMessenger.sol";
-import {Predeploys} from '@optimism/libraries/Predeploys.sol';
+import {IL2ToL2CrossDomainMessenger} from '@optimism/interfaces/L2/IL2ToL2CrossDomainMessenger.sol';
+import {Predeploys} from '@optimism/src/libraries/Predeploys.sol';
 
 import {Initializable} from '@solady/utils/Initializable.sol';
 import {ERC721} from '@solady/tokens/ERC721.sol';
 import {LibClone} from '@solady/utils/LibClone.sol';
 import {LibString} from '@solady/utils/LibString.sol';
 import {Ownable} from '@solady/auth/Ownable.sol';
+
+import {PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
 
 import {PositionManager} from '@flaunch/PositionManager.sol';
 import {TokenSupply} from '@flaunch/libraries/TokenSupply.sol';
@@ -25,18 +27,22 @@ import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
 contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
 
     error CallerNotL2ToL2CrossDomainMessenger();
-    error InvalidDestinationChain();
     error CallerIsNotPositionManager();
     error CreatorFeeAllocationInvalid(uint24 _allocation, uint _maxAllocation);
     error InvalidCrossDomainSender();
+    error InvalidDestinationChain();
     error InvalidFlaunchSchedule();
     error InvalidInitialSupply(uint _initialSupply);
     error PremineExceedsInitialAmount(uint _buyAmount, uint _initialSupply);
+    error TokenAlreadyBridging();
     error TokenAlreadyBridged();
     error UnknownMemecoin();
 
     event TokenBridging(uint _tokenId, uint _chainId, address _memecoin);
     event TokenBridged(uint _tokenId, uint _chainId, address _memecoin, uint _messageSource);
+    event BaseURIUpdated(string _newBaseURI);
+    event MemecoinImplementationUpdated(address _newImplementation);
+    event MemecoinTreasuryImplementationUpdated(address _newImplementation);
 
     /**
      * Stores related memecoin contract implementation addresses.
@@ -74,8 +80,11 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     /// The maximum duration of a flaunch schedule
     uint public constant MAX_SCHEDULE_DURATION = 30 days;
 
+    /// The maximum amount of time to allow for a bridging finalization before allowing a retry
+    uint public constant MAX_BRIDGING_WINDOW = 1 hours;
+
     /// Our basic token information
-    string internal _name = 'Flaunch Memestreams';
+    string internal _name = 'Flaunch Revenue Streams';
     string internal _symbol = 'FLAUNCH';
 
     /// The base URI to represent the metadata
@@ -89,7 +98,7 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     PositionManager public positionManager;
 
     /// Our token implementations that will be deployed when a new token is flaunched
-    address public immutable memecoinImplementation;
+    address public memecoinImplementation;
     address public memecoinTreasuryImplementation;
 
     /// Maps `TokenInfo` for each token ID
@@ -99,7 +108,9 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     mapping (address _memecoin => uint _tokenId) public tokenId;
 
     /// Maps our ERC20 bridging statuses
-    mapping (uint _tokenId => mapping (uint _chainId => bool _started)) public bridgingStatus;
+    mapping (uint _tokenId => mapping (uint _chainId => uint _startedAt)) public bridgingStarted;
+    mapping (uint _tokenId => mapping (uint _chainId => bool _finalized)) public bridgingFinalized;
+
 
     /**
      * References the contract addresses for the Flaunch protocol.
@@ -203,6 +214,27 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
      */
     function setBaseURI(string memory _baseURI) external onlyOwner {
         baseURI = _baseURI;
+        emit BaseURIUpdated(_baseURI);
+    }
+
+    /**
+     * Allows the contract owner to update the memecoin implementation address.
+     * 
+     * @param _memecoinImplementation The new memecoin implementation address
+     */
+    function setMemecoinImplementation(address _memecoinImplementation) external onlyOwner {
+        memecoinImplementation = _memecoinImplementation;
+        emit MemecoinImplementationUpdated(_memecoinImplementation);
+    }
+
+    /**
+     * Allows the contract owner to update the memecoin treasury implementation address.
+     * 
+     * @param _memecoinTreasuryImplementation The new memecoin treasury implementation address
+     */
+    function setMemecoinTreasuryImplementation(address _memecoinTreasuryImplementation) external onlyOwner {
+        memecoinTreasuryImplementation = _memecoinTreasuryImplementation;
+        emit MemecoinTreasuryImplementationUpdated(_memecoinTreasuryImplementation);
     }
 
     /**
@@ -241,7 +273,7 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     }
 
     /**
-     * Helpers to show the {Memecoin} address for the ERC721.
+     * Helper to show the {Memecoin} address for the ERC721.
      *
      * @param _tokenId The token ID to get the {Memecoin} for
      *
@@ -252,7 +284,7 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
     }
 
     /**
-     * Helpers to show the {MemecoinTreasury} address for the ERC721.
+     * Helper to show the {MemecoinTreasury} address for the ERC721.
      *
      * @param _tokenId The token ID to get the {MemecoinTreasury} for
      *
@@ -260,6 +292,17 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
      */
     function memecoinTreasury(uint _tokenId) public view returns (address payable) {
         return tokenInfo[_tokenId].memecoinTreasury;
+    }
+
+    /**
+     * Helper to show the {PoolId} address for the ERC721 token.
+     *
+     * @param _tokenId The token ID to get the {PoolId} for
+     *
+     * @return PoolId The {PoolId} for the token
+     */
+    function poolId(uint _tokenId) public view returns (PoolId) {
+        return positionManager.poolKey(tokenInfo[_tokenId].memecoin).toId();
     }
 
     /**
@@ -288,15 +331,27 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
      * @param _chainId The destination L2 chainId
      */
     function initializeBridge(uint _tokenId, uint _chainId) public {
-        if (_chainId == block.chainid) revert InvalidDestinationChain();
+        // Ensure that we are not calling the same chain
+        if (_chainId == block.chainid) {
+            revert InvalidDestinationChain();
+        }
 
-        // Ensure we have not already bridged
-        if (bridgingStatus[_tokenId][_chainId]) {
+        // Ensure that the bridge has not already been finalized
+        if (bridgingFinalized[_tokenId][_chainId]) {
             revert TokenAlreadyBridged();
         }
 
+        // If the token bridging process has already been started, then we don't allow this
+        // to be triggered again for a set window of time.
+        if (
+            bridgingStarted[_tokenId][_chainId] != 0 &&
+            block.timestamp < bridgingStarted[_tokenId][_chainId] + MAX_BRIDGING_WINDOW
+        ) {
+            revert TokenAlreadyBridging();
+        }
+
         // Update our bridging status to show it has started
-        bridgingStatus[_tokenId][_chainId] = true;
+        bridgingStarted[_tokenId][_chainId] = block.timestamp;
 
         // Find the memecoin for metadata discovery
         address memecoinAddress = memecoin(_tokenId);
@@ -306,7 +361,10 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
             revert UnknownMemecoin();
         }
 
-        // Send the memecoin data to another L2
+        // Send the memecoin data to another L2. On previous versions of Superchain Interoperability
+        // this would revert in the `sendMessage` call if the target contract did not exist. However,
+        // in recent updates this is no longer the case, so we need to allow for this to be retried
+        // at a later date.
         IMemecoin _memecoin = IMemecoin(memecoinAddress);
         messenger.sendMessage(
             _chainId,
@@ -335,6 +393,9 @@ contract Flaunch is ERC721, IFlaunch, Initializable, Ownable {
      * @param _metadata Memecoin token metadata to initialize with
      */
     function finalizeBridge(uint _tokenId, MemecoinMetadata memory _metadata) public onlyCrossDomainCallback {
+        // Map our bridging as being finalized
+        bridgingFinalized[_tokenId][block.chainid] = true;
+
         // Deploy the token on this chain
         address memecoin_ = LibClone.cloneDeterministic(memecoinImplementation, bytes32(_tokenId));
 

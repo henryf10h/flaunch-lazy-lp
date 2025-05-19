@@ -65,7 +65,8 @@ contract SnapshotAirdrop is BaseAirdrop, ISnapshotAirdrop {
         // Take snapshot of the balances
         uint totalSupply = Memecoin(_memecoin).totalSupply();  // not using 100e27 so as to account for token burns
         uint notEligibleSupply = Memecoin(_memecoin).balanceOf(address(positionManager)) + 
-                Memecoin(_memecoin).balanceOf(address(positionManager.poolManager()));
+                Memecoin(_memecoin).balanceOf(address(positionManager.poolManager())) +
+                Memecoin(_memecoin).balanceOf(Memecoin(_memecoin).treasury());
         
         // Create our airdrop struct
         airdropIndex = airdropsCount[_memecoin];
@@ -185,6 +186,8 @@ contract SnapshotAirdrop is BaseAirdrop, ISnapshotAirdrop {
      * @return claimableAmount The claimable amount
      */
     function checkAirdropEligibility(address _memecoin, uint _airdropIndex, address _user) external view override(ISnapshotAirdrop) returns (uint claimableAmount) {
+        if (!isAirdropActive(_memecoin, _airdropIndex)) return 0;
+
         AirdropData storage airdrop = _airdropData[_memecoin][_airdropIndex];
         uint claimantBalanceSnapshot = Memecoin(_memecoin).getPastVotes(_user, airdrop.memecoinHoldersTimestamp);
 

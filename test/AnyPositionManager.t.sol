@@ -39,16 +39,16 @@ contract AnyPositionManagerTest is FlaunchTest {
 
         vm.expectRevert(UNAUTHORIZED);
         vm.prank(_caller);
-        anyPositionManager.approveMemecoin(memecoin, address(this));
+        anyPositionManager.approveCreator(address(this), true);
     }
 
-    function test_approveMemecoin_SuccessIfOwner(address _creator) public {
-        anyPositionManager.approveMemecoin(memecoin, _creator);
-        assertEq(anyPositionManager.approvedMemecoinToCreator(memecoin), _creator);
+    function test_approveCreator_SuccessIfOwner(address _creator, bool _isApproved) public {
+        anyPositionManager.approveCreator(_creator, _isApproved);
+        assertEq(anyPositionManager.approvedMemecoinCreator(_creator), _isApproved);
     }
 
     function test_CannotFlaunchIfNotApproved() public {
-        vm.expectRevert(AnyPositionManager.CallerIsNotCreator.selector);
+        vm.expectRevert(AnyPositionManager.CallerIsNotApprovedCreator.selector);
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({
                 memecoin: memecoin,
@@ -62,7 +62,7 @@ contract AnyPositionManagerTest is FlaunchTest {
 
     function test_CanFlaunch(uint24 _creatorFeeAllocation, bool _flipped) public flipTokens(_flipped) {
         vm.assume(_creatorFeeAllocation <= 100_00);
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({
@@ -91,7 +91,7 @@ contract AnyPositionManagerTest is FlaunchTest {
     function test_CanMassFlaunch(uint8 flaunchCount, bool _flipped) public flipTokens(_flipped) {
         for (uint i; i < flaunchCount; ++i) {
             memecoin = address(new ERC20Mock('Token Name', 'TOKEN'));
-            _approveMemecoin(memecoin, address(this));
+            _approveCreator(address(this));
 
             anyPositionManager.flaunch(
                 AnyPositionManager.FlaunchParams({
@@ -349,7 +349,7 @@ contract AnyPositionManagerTest is FlaunchTest {
     }
 
     function test_CanBurn721IfCreator() public {
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({
@@ -364,10 +364,17 @@ contract AnyPositionManagerTest is FlaunchTest {
         uint tokenId = anyFlaunch.tokenId(memecoin);
 
         anyFlaunch.burn(tokenId);
+
+        // Confirm our expected ERC721 responses. The owner should revert as is expected, but
+        // our creator call should handle this and instead just return a zero address.
+        vm.expectRevert();
+        anyFlaunch.ownerOf(tokenId);
+
+        assertEq(anyFlaunch.creator(memecoin), address(0));
     }
 
     function test_CanBurn721IfApproved() public {
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({
@@ -389,7 +396,7 @@ contract AnyPositionManagerTest is FlaunchTest {
     }
 
     function test_CannotBurn721IfNotCreatorOrApproved() public {
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({
@@ -411,7 +418,7 @@ contract AnyPositionManagerTest is FlaunchTest {
 
     function test_CannotFlaunchWithInvalidCreatorFeeAllocation(uint24 _creatorFeeAllocation) public {
         vm.assume(_creatorFeeAllocation > 100_00);
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         vm.expectRevert(abi.encodeWithSelector(AnyFlaunch.CreatorFeeAllocationInvalid.selector, _creatorFeeAllocation, anyFlaunch.MAX_CREATOR_ALLOCATION()));
         anyPositionManager.flaunch(
@@ -516,12 +523,12 @@ contract AnyPositionManagerTest is FlaunchTest {
         );
     }
 
-    function _approveMemecoin(address _memecoin, address _creator) internal {
-        anyPositionManager.approveMemecoin(_memecoin, _creator);
+    function _approveCreator(address _creator) internal {
+        anyPositionManager.approveCreator(_creator, true);
     }
 
     function _flaunch() internal {
-        _approveMemecoin(memecoin, address(this));
+        _approveCreator(address(this));
 
         anyPositionManager.flaunch(
             AnyPositionManager.FlaunchParams({

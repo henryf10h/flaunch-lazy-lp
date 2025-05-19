@@ -119,7 +119,7 @@ abstract contract ERC20 {
 
     /// @dev The canonical Permit2 address.
     /// For signature-based allowance granting for single transaction ERC20 `transferFrom`.
-    /// To enable, override `_givePermit2InfiniteAllowance()`.
+    /// Enabled by default. To disable, override `_givePermit2InfiniteAllowance()`.
     /// [Github](https://github.com/Uniswap/permit2)
     /// [Etherscan](https://etherscan.io/address/0x000000000022D473030F116dDEE9F6B43aC78BA3)
     address internal constant _PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
@@ -665,6 +665,6 @@ abstract contract ERC20 {
     /// or else the actual allowance values may not match with the {Approval} events.
     /// For best performance, return a compile-time constant for zero-cost abstraction.
     function _givePermit2InfiniteAllowance() internal view virtual returns (bool) {
-        return false;
+        return true;
     }
 }

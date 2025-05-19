@@ -86,18 +86,13 @@ func TestEVM_SingleStep_Operators64(t *testing.T) {
 	testOperators(t, cases, false)
 }
 
+// Additional 64-bit tests
 func TestEVM_SingleStep_Bitwise64(t *testing.T) {
 	cases := []operatorTestCase{
-		{name: "and", funct: 0x24, isImm: false, rs: Word(1200), rt: Word(490), expectRes: Word(160)},                          // and t0, s1, s2
-		{name: "andi", opcode: 0xc, isImm: true, rs: Word(4), rt: Word(1), imm: uint16(40), expectRes: Word(0)},                // andi t0, s1, 40
-		{name: "or", funct: 0x25, isImm: false, rs: Word(1200), rt: Word(490), expectRes: Word(1530)},                          // or t0, s1, s2
-		{name: "ori", opcode: 0xd, isImm: true, rs: Word(4), rt: Word(1), imm: uint16(40), expectRes: Word(44)},                // ori t0, s1, 40
-		{name: "xor", funct: 0x26, isImm: false, rs: Word(1200), rt: Word(490), expectRes: Word(1370)},                         // xor t0, s1, s2
-		{name: "xori", opcode: 0xe, isImm: true, rs: Word(4), rt: Word(1), imm: uint16(40), expectRes: Word(44)},               // xori t0, s1, 40
-		{name: "nor", funct: 0x27, isImm: false, rs: Word(0x4b0), rt: Word(0x1ea), expectRes: Word(0xFF_FF_FF_FF_FF_FF_FA_05)}, // nor t0, s1, s2
-		{name: "slt", funct: 0x2a, isImm: false, rs: 0xFF_FF_FF_FE, rt: Word(5), expectRes: Word(0)},                           // slt t0, s1, s2
-		{name: "slt", funct: 0x2a, isImm: false, rs: 0xFF_FF_FF_FF_FF_FF_FF_FE, rt: Word(5), expectRes: Word(1)},               // slt t0, s1, s2
-		{name: "sltu", funct: 0x2b, isImm: false, rs: Word(1200), rt: Word(490), expectRes: Word(0)},                           // sltu t0, s1, s2
+		{name: "slt", funct: 0x2a, isImm: false, rs: 0xFF_FF_FF_FE, rt: Word(5), expectRes: Word(0)},             // slt t0, s1, s2
+		{name: "slt", funct: 0x2a, isImm: false, rs: 0xFF_FF_FF_FF_FF_FF_FF_FE, rt: Word(5), expectRes: Word(1)}, // slt t0, s1, s2
+		{name: "slti", opcode: 0xa, isImm: true, rs: 0xFF_FF_FF_FE, imm: 5, expectRes: Word(0)},                  // slt t0, s1, s2
+		{name: "slti", opcode: 0xa, isImm: true, rs: 0xFF_FF_FF_FF_FF_FF_FF_FE, imm: 5, expectRes: Word(1)},      // slt t0, s1, s2
 	}
 	testOperators(t, cases, false)
 }
@@ -483,6 +478,15 @@ func TestEVM_SingleStep_Branch64(t *testing.T) {
 		{name: "bltz rs only sign bit set", pc: 0x10, opcode: 0x1, regimm: 0x0, rs: testutil.ToSignedInteger(0x80_00_00_00_00_00_00_00), offset: 0x100, expectNextPC: 0x414},
 		{name: "bltz sign-extended offset", pc: 0x10, opcode: 0x1, regimm: 0x0, rs: -1, offset: 0x80_00, expectNextPC: 0xFF_FF_FF_FF_FF_FE_00_14},
 		{name: "bltz large offset no-sign", pc: 0x10, opcode: 0x1, regimm: 0x0, rs: -1, offset: 0x7F_FF, expectNextPC: 0x2_00_10},
+
+		// bltzal t0, $x
+		{name: "bltzal", pc: 0, opcode: 0x1, regimm: 0x10, rs: 0x5, offset: 0x100, expectNextPC: 0x8, expectLink: true},
+		{name: "bltzal large rs", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: 0x7F_FF_FF_FF_FF_FF_FF_FF, offset: 0x100, expectNextPC: 0x18, expectLink: true},
+		{name: "bltzal zero rs", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: 0x0, offset: 0x100, expectNextPC: 0x18, expectLink: true},
+		{name: "bltzal sign rs", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: -1, offset: 0x100, expectNextPC: 0x414, expectLink: true},
+		{name: "bltzal rs only sign bit set", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: testutil.ToSignedInteger(0x80_00_00_00_00_00_00_00), offset: 0x100, expectNextPC: 0x414, expectLink: true},
+		{name: "bltzal sign-extended offset", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: -1, offset: 0x80_00, expectNextPC: 0xFF_FF_FF_FF_FF_FE_00_14, expectLink: true},
+		{name: "bltzal large offset no-sign", pc: 0x10, opcode: 0x1, regimm: 0x10, rs: -1, offset: 0x7F_FF, expectNextPC: 0x2_00_10, expectLink: true},
 
 		// bgez t0, $x
 		{name: "bgez", pc: 0, opcode: 0x1, regimm: 0x1, rs: 0x5, offset: 0x100, expectNextPC: 0x404},

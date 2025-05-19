@@ -68,9 +68,6 @@ contract FairLaunch is AccessControl {
         bool closed;
     }
 
-    /// Our fair launch window duration
-    uint public constant FAIR_LAUNCH_WINDOW = 30 minutes;
-
     /// Maps a PoolId to a FairLaunchInfo struct
     mapping (PoolId _poolId => FairLaunchInfo _info) internal _fairLaunchInfo;
 
@@ -122,12 +119,18 @@ contract FairLaunch is AccessControl {
         PoolId _poolId,
         int24 _initialTick,
         uint _flaunchesAt,
-        uint _initialTokenFairLaunch
+        uint _initialTokenFairLaunch,
+        uint _fairLaunchDuration
     ) public virtual onlyPositionManager returns (
         FairLaunchInfo memory
     ) {
+        // If we have no initial tokens, then we need to overwrite our fair launch duration to zero
+        if (_initialTokenFairLaunch == 0) {
+            _fairLaunchDuration = 0;
+        }
+
         // Determine the time that the fair launch window will close
-        uint endsAt = _flaunchesAt + FAIR_LAUNCH_WINDOW;
+        uint endsAt = _flaunchesAt + _fairLaunchDuration;
 
         // Map these tokens into an pseudo-escrow that we can reference during the sale
         // and activate our pool fair launch window.
@@ -146,8 +149,8 @@ contract FairLaunch is AccessControl {
 
     /**
      * Closes the FairLaunch position and recreates the position as a wide range position immediately
-     * above the tick for our memecoin. This position is comprised of any unsold Memecoin
-     * from the FairLaunch, as well as the remaining supply from mint.
+     * above the tick for our memecoin. This position is comprised of tokens not allocated to the
+     * Fair Launch. Any unsold tokens from the Fair Launch will be burned.
      *
      * @param _poolKey The PoolKey we are closing the FairLaunch position of
      * @param _tokenFees The amount of token fees that need to remain in the {PositionManager}
@@ -172,20 +175,20 @@ contract FairLaunch is AccessControl {
             tickUpper = tickLower + TickFinder.TICK_SPACING;
             _createImmutablePosition(_poolKey, tickLower, tickUpper, info.revenue, true);
 
-            // memecoin position
+            // memecoin position (unsold fair launch supply gets burned in PositionManager)
             tickLower = TickFinder.MIN_TICK;
             tickUpper = (info.initialTick - 1).validTick(true);
-            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency1.balanceOf(msg.sender) - _tokenFees, false);
+            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency1.balanceOf(msg.sender) - _tokenFees - info.supply, false);
         } else {
             // ETH position
             tickUpper = (info.initialTick - 1).validTick(true);
             tickLower = tickUpper - TickFinder.TICK_SPACING;
             _createImmutablePosition(_poolKey, tickLower, tickUpper, info.revenue, false);
 
-            // memecoin position
+            // memecoin position (unsold fair launch supply gets burned in PositionManager)
             tickLower = (info.initialTick + 1).validTick(false);
             tickUpper = TickFinder.MAX_TICK;
-            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency0.balanceOf(msg.sender) - _tokenFees, true);
+            _createImmutablePosition(_poolKey, tickLower, tickUpper, _poolKey.currency0.balanceOf(msg.sender) - _tokenFees - info.supply, true);
         }
 
         // Mark our position as closed

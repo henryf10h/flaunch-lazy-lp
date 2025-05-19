@@ -6,11 +6,11 @@ import { CommonTest } from "test/setup/CommonTest.sol";
 
 // Contracts
 import { ERC721 } from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import { OptimismMintableERC721 } from "src/universal/OptimismMintableERC721.sol";
+import { OptimismMintableERC721 } from "src/L2/OptimismMintableERC721.sol";
 
 // Interfaces
-import { IL1ERC721Bridge } from "src/L1/interfaces/IL1ERC721Bridge.sol";
-import { IL2ERC721Bridge } from "src/L2/interfaces/IL2ERC721Bridge.sol";
+import { IL1ERC721Bridge } from "interfaces/L1/IL1ERC721Bridge.sol";
+import { IL2ERC721Bridge } from "interfaces/L2/IL2ERC721Bridge.sol";
 
 contract TestERC721 is ERC721 {
     constructor() ERC721("Test", "TST") { }
@@ -109,7 +109,7 @@ contract L2ERC721Bridge_Test is CommonTest {
         emit ERC721BridgeInitiated(address(localToken), address(remoteToken), alice, alice, tokenId, hex"5678");
 
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         l2ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
 
         // Token is burned.
@@ -132,7 +132,7 @@ contract L2ERC721Bridge_Test is CommonTest {
     /// @dev Tests that `bridgeERC721` reverts if the local token is the zero address.
     function test_bridgeERC721_localTokenZeroAddress_reverts() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         vm.expectRevert(bytes(""));
         l2ERC721Bridge.bridgeERC721(address(0), address(remoteToken), tokenId, 1234, hex"5678");
 
@@ -143,7 +143,7 @@ contract L2ERC721Bridge_Test is CommonTest {
     /// @dev Tests that `bridgeERC721` reverts if the remote token is the zero address.
     function test_bridgeERC721_remoteTokenZeroAddress_reverts() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         vm.expectRevert("L2ERC721Bridge: remote token cannot be address(0)");
         l2ERC721Bridge.bridgeERC721(address(localToken), address(0), tokenId, 1234, hex"5678");
 
@@ -154,7 +154,7 @@ contract L2ERC721Bridge_Test is CommonTest {
     /// @dev Tests that `bridgeERC721` reverts if the caller is not the token owner.
     function test_bridgeERC721_wrongOwner_reverts() external {
         // Bridge the token.
-        vm.prank(bob);
+        vm.prank(bob, bob);
         vm.expectRevert("L2ERC721Bridge: Withdrawal is not being initiated by NFT owner");
         l2ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
 
@@ -238,7 +238,7 @@ contract L2ERC721Bridge_Test is CommonTest {
     /// @dev Tests that `finalizeBridgeERC721` correctly finalizes a bridged token.
     function test_finalizeBridgeERC721_succeeds() external {
         // Bridge the token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         l2ERC721Bridge.bridgeERC721(address(localToken), address(remoteToken), tokenId, 1234, hex"5678");
 
         // Expect an event to be emitted.
@@ -265,7 +265,7 @@ contract L2ERC721Bridge_Test is CommonTest {
         NonCompliantERC721 nonCompliantToken = new NonCompliantERC721(alice);
 
         // Bridge the non-compliant token.
-        vm.prank(alice);
+        vm.prank(alice, alice);
         l2ERC721Bridge.bridgeERC721(address(nonCompliantToken), address(0x01), tokenId, 1234, hex"5678");
 
         // Attempt to finalize the withdrawal. Should revert because the token does not claim

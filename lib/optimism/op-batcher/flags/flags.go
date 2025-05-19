@@ -138,8 +138,8 @@ var (
 	}
 	ActiveSequencerCheckDurationFlag = &cli.DurationFlag{
 		Name:    "active-sequencer-check-duration",
-		Usage:   "The duration between checks to determine the active sequencer endpoint. ",
-		Value:   2 * time.Minute,
+		Usage:   "The duration between checks to determine the active sequencer endpoint.",
+		Value:   5 * time.Second,
 		EnvVars: prefixEnvVars("ACTIVE_SEQUENCER_CHECK_DURATION"),
 	}
 	CheckRecentTxsDepthFlag = &cli.IntFlag{
@@ -156,22 +156,16 @@ var (
 		Value:   false,
 		EnvVars: prefixEnvVars("WAIT_NODE_SYNC"),
 	}
-	ThrottleIntervalFlag = &cli.DurationFlag{
-		Name:    "throttle-interval",
-		Usage:   "Interval between potential DA throttling actions. Zero disables throttling.",
-		Value:   2 * time.Second,
-		EnvVars: prefixEnvVars("THROTTLE_INTERVAL"),
-	}
 	ThrottleThresholdFlag = &cli.IntFlag{
 		Name:    "throttle-threshold",
-		Usage:   "The threshold on pending-blocks-bytes-current beyond which the batcher will instruct the block builder to start throttling transactions with larger DA demands",
+		Usage:   "The threshold on pending-blocks-bytes-current beyond which the batcher will instruct the block builder to start throttling transactions with larger DA demands. Zero disables throttling.",
 		Value:   1_000_000,
 		EnvVars: prefixEnvVars("THROTTLE_THRESHOLD"),
 	}
 	ThrottleTxSizeFlag = &cli.IntFlag{
 		Name:    "throttle-tx-size",
 		Usage:   "The DA size of transactions to start throttling when we are over the throttle threshold",
-		Value:   300, // most transactions compress to under 300 bytes. TODO: compute exact distribution
+		Value:   5000, // less than 1% of all transactions should be affected by this limit
 		EnvVars: prefixEnvVars("THROTTLE_TX_SIZE"),
 	}
 	ThrottleBlockSizeFlag = &cli.IntFlag{
@@ -185,6 +179,12 @@ var (
 		Usage:   "The total DA limit to start imposing on block building at all times",
 		Value:   130_000, // should be larger than the builder's max-l2-tx-size to prevent endlessly throttling some txs
 		EnvVars: prefixEnvVars("THROTTLE_ALWAYS_BLOCK_SIZE"),
+	}
+	PreferLocalSafeL2Flag = &cli.BoolFlag{
+		Name:    "prefer-local-safe-l2",
+		Usage:   "Load unsafe blocks higher than the sequencer's LocalSafeL2 instead of SafeL2",
+		Value:   false,
+		EnvVars: prefixEnvVars("PREFER_LOCAL_SAFE_L2"),
 	}
 	// Legacy Flags
 	SequencerHDPathFlag = txmgr.SequencerHDPathFlag
@@ -215,10 +215,10 @@ var optionalFlags = []cli.Flag{
 	ActiveSequencerCheckDurationFlag,
 	CompressionAlgoFlag,
 	ThrottleThresholdFlag,
-	ThrottleIntervalFlag,
 	ThrottleTxSizeFlag,
 	ThrottleBlockSizeFlag,
 	ThrottleAlwaysBlockSizeFlag,
+	PreferLocalSafeL2Flag,
 }
 
 func init() {

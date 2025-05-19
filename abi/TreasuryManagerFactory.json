@@ -7,6 +7,11 @@
           "name": "_protocolOwner",
           "type": "address",
           "internalType": "address"
+        },
+        {
+          "name": "_feeEscrow",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "stateMutability": "nonpayable"
@@ -78,6 +83,35 @@
     },
     {
       "type": "function",
+      "name": "deployAndInitializeManager",
+      "inputs": [
+        {
+          "name": "_managerImplementation",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_owner",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_data",
+          "type": "bytes",
+          "internalType": "bytes"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "manager_",
+          "type": "address",
+          "internalType": "address payable"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "deployManager",
       "inputs": [
         {
@@ -94,6 +128,19 @@
         }
       ],
       "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "feeEscrow",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IFeeEscrow"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",

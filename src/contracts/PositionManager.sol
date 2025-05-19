@@ -80,6 +80,9 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
     /// Emitted when the `IInitialPrice` contract has been updated
     event InitialPriceUpdated(address _initialPrice);
 
+    /// Emitted when the `FairLaunch` contract has burned unsold fair launch supply
+    event FairLaunchBurn(PoolId indexed _poolId, uint _unsoldSupply);
+
     /**
      * Defines our constructor parameters.
      *
@@ -90,6 +93,7 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
      * @member protocolOwner The EOA that will be the initial owner
      * @member protocolFeeRecipient The recipient EOA of all
      * @member flayGovernance The $FLAY token governance address
+     * @member feeEscrow The {FeeEscrow} contract to be used by the PositionManager
      * @member feeExemptions The default global FeeExemption values
      * @member actionManager The {TreasuryActionManager} contract
      * @member bidWall The {BidWall} contract to be used by the PositionManager
@@ -103,22 +107,11 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         address protocolOwner;
         address protocolFeeRecipient;
         address flayGovernance;
+        address feeEscrow;
         FeeExemptions feeExemptions;
         TreasuryActionManager actionManager;
         BidWall bidWall;
         FairLaunch fairLaunch;
-    }
-
-    /**
-     * If the creator requests a premine amount of tokens, then these will be cast
-     * to this structure.
-     *
-     * @member amountSpecified The amount of tokens requested to buy as creator
-     * @member blockNumber The block that the premine is created and allocated
-     */
-    struct PoolPremineInfo {
-        int amountSpecified;
-        uint blockNumber;
     }
 
     /**
@@ -128,6 +121,7 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
      * @member symbol Symbol of the token
      * @member tokenUri The generated ERC721 token URI
      * @member initialTokenFairLaunch The amount of tokens to add as single sided fair launch liquidity
+     * @member fairLaunchDuration The duration of the fair launch period
      * @member premineAmount The amount of tokens that the creator will buy themselves
      * @member creator The address that will receive the ERC721 ownership and premined ERC20 tokens
      * @member creatorFeeAllocation The percentage of fees the creators wants to take from the BidWall
@@ -140,6 +134,7 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         string symbol;
         string tokenUri;
         uint initialTokenFairLaunch;
+        uint fairLaunchDuration;
         uint premineAmount;
         address creator;
         uint24 creatorFeeAllocation;
@@ -150,6 +145,9 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
 
     /// The minimum amount before a distribution is triggered
     uint public constant MIN_DISTRIBUTE_THRESHOLD = 0.001 ether;
+
+    /// The `dEaD` address to burn our unsold memecoins to
+    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     /// The contract that will be used for flaunching tokens
     IFlaunch public flaunchContract;
@@ -181,15 +179,12 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
     /// Store the block timestamp when a poolId is set to launch
     mapping (PoolId _poolId => uint _flaunchTime) public flaunchesAt;
 
-    /// Store the premine information for a pool
-    mapping (PoolId _poolId => PoolPremineInfo _premineInfo) public premineInfo;
-
     /**
      * Initializes our {BaseHook} contract and initializes all implemented hooks.
      */
     constructor (ConstructorParams memory params)
         BaseHook(params.poolManager)
-        FeeDistributor(params.nativeToken, params.feeDistribution, params.protocolOwner, params.flayGovernance)
+        FeeDistributor(params.nativeToken, params.feeDistribution, params.protocolOwner, params.flayGovernance, params.feeEscrow)
     {
         // Set our contract references
         initialPrice = params.initialPrice;
@@ -291,10 +286,8 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
          */
 
         if (_params.premineAmount != 0) {
-            premineInfo[poolId] = PoolPremineInfo({
-                amountSpecified: _params.premineAmount.toInt256(),
-                blockNumber: block.number
-            });
+            int premineAmount = _params.premineAmount.toInt256();
+            assembly { tstore(IS_PREMINE, premineAmount) }
         }
 
         /**
@@ -306,14 +299,16 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
         // with tokens from this contract.
         IMemecoin(memecoin_).approve(address(fairLaunch), type(uint).max);
 
-        if (_params.initialTokenFairLaunch != 0) {
-            fairLaunch.createPosition(
-                poolId,
-                initialTick,
-                _params.flaunchAt > block.timestamp ? _params.flaunchAt : block.timestamp,
-                _params.initialTokenFairLaunch
-            );
-        }
+        // Regardless of having a fair launch, we need to call `createPosition` as this
+        // instantiates our storage struct that is required for when the position is closed
+        // and the tokens are moved to a Uniswap V4 liquidity position.
+        fairLaunch.createPosition({
+            _poolId: poolId,
+            _initialTick: initialTick,
+            _flaunchesAt: _params.flaunchAt > block.timestamp ? _params.flaunchAt : block.timestamp,
+            _initialTokenFairLaunch: _params.initialTokenFairLaunch,
+            _fairLaunchDuration: _params.fairLaunchDuration
+        });
 
         /**
          * [SCHEDULE] If we have a timestamp in the future, then we set our schedule mapping.
@@ -436,15 +431,13 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
             uint _flaunchesAt = flaunchesAt[poolId];
             if (_flaunchesAt != 0) {
                 // If we have a schedule set for the token, then we need to make an additional
-                // check to see if a premine is set, and if it's valid.
-                PoolPremineInfo storage _premineInfo = premineInfo[poolId];
-
-                // The validity of a premine ensures that we are in the same block and that the
-                // amount specified is the same. We cannot check that the caller is the same as
-                // the `_sender` is obfuscated to be the swap contract.
-                if (_premineInfo.blockNumber == block.number && _params.amountSpecified == _premineInfo.amountSpecified) {
-                    emit PoolPremine(poolId, _premineInfo.amountSpecified);
-                    _premineInfo.blockNumber = 0;
+                // check to see if a premine is set, and if it's valid. The validity of a premine
+                // ensures that we are in the same block and that the amount specified is the same.
+                // We cannot check that the caller is the same as the `_sender` is obfuscated to
+                // be the swap contract.
+                int premineAmount = _tload(IS_PREMINE);
+                if (premineAmount != 0 && _params.amountSpecified == premineAmount) {
+                    emit PoolPremine(poolId, premineAmount);
                 } else {
                     // If the timestamp has not yet passed, then we revert
                     if (_flaunchesAt > block.timestamp) {
@@ -464,16 +457,26 @@ contract PositionManager is BaseHook, FeeDistributor, InternalSwapPool, StoreKey
             bool nativeIsZero = nativeToken == Currency.unwrap(_key.currency0);
 
             /**
-             * [FL] If the FairLaunch window has ended, but our position is still open, then we
+             * [FL] If it's not premine, and the FairLaunch window has ended, but our position is still open, then we
              * need to close the position.
              */
 
-            if (!fairLaunch.inFairLaunchWindow(poolId)) {
+            if (_tload(IS_PREMINE) == 0 && !fairLaunch.inFairLaunchWindow(poolId)) {
+                uint unsoldSupply = fairLaunchInfo.supply;
+                
+                // closes the fair launch position, putting remaining memecoin supply into the liquidity pool
+                // minus the unsold fair launch supply, which is burned
                 fairLaunch.closePosition({
                     _poolKey: _key,
                     _tokenFees: _poolFees[poolId].amount1,
                     _nativeIsZero: nativeIsZero
                 });
+
+                // burn the unsold fair launch supply
+                if (unsoldSupply != 0) {
+                    (nativeIsZero ? _key.currency1 : _key.currency0).transfer(BURN_ADDRESS, unsoldSupply);
+                    emit FairLaunchBurn(poolId, unsoldSupply);
+                }
             }
             else {
 

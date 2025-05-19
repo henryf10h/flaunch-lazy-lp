@@ -134,6 +134,7 @@ contract BuyBackAndBurnFlay is BaseSubscriber, Ownable {
 
         // Confirm that we have a valid PoolKey
         if (flayPoolKey.tickSpacing == 0) {
+            _emitEthBalance(ethBalance);
             return;
         }
 

@@ -42,7 +42,7 @@ func setupEndpointProviderTest(t *testing.T, numSequencers int) *endpointProvide
 	return ept
 }
 
-// newActiveL2EndpointProvider constructs a new ActiveL2RollupProvider using the test harness setup.
+// newActiveL2RollupProvider constructs a new ActiveL2RollupProvider using the test harness setup.
 func (et *endpointProviderTest) newActiveL2RollupProvider(checkDuration time.Duration) (*ActiveL2RollupProvider, error) {
 	mockRollupDialer := func(ctx context.Context, log log.Logger, url string) (RollupClientInterface, error) {
 		for i, client := range et.rollupClients {
@@ -148,6 +148,12 @@ func TestRollupProvider_FailoverOnInactiveSequencer(t *testing.T) {
 	rollupProvider, err := ept.newActiveL2RollupProvider(0)
 	require.NoError(t, err)
 
+	numInvocations := 0
+	mockCallback := func() {
+		numInvocations++
+	}
+	rollupProvider.SetOnActiveProviderChanged(mockCallback)
+
 	firstSequencerUsed, err := rollupProvider.RollupClient(context.Background())
 	require.NoError(t, err)
 	require.Same(t, primarySequencer, firstSequencerUsed)
@@ -159,6 +165,7 @@ func TestRollupProvider_FailoverOnInactiveSequencer(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, secondarySequencer, secondSequencerUsed)
 	ept.assertAllExpectations(t)
+	require.Equal(t, 1, numInvocations)
 }
 
 // TestEndpointProvider_FailoverOnInactiveSequencer verifies that the ActiveL2EndpointProvider

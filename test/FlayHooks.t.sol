@@ -12,6 +12,7 @@ import {TickMath} from '@uniswap/v4-core/src/libraries/TickMath.sol';
 
 import {FlayHooks} from '@flaunch/FlayHooks.sol';
 import {PoolSwap} from '@flaunch/zaps/PoolSwap.sol';
+import {ProtocolRoles} from '@flaunch/libraries/ProtocolRoles.sol';
 
 import {ERC20Mock} from './tokens/ERC20Mock.sol';
 import {FlaunchTest} from './FlaunchTest.sol';
@@ -55,6 +56,7 @@ contract FlayHooksTest is FlaunchTest {
         );
 
         flayHooks = FlayHooks(VALID_FLAY_HOOKS_ADDRESS);
+        flayHooks.bidWall().grantRole(ProtocolRoles.POSITION_MANAGER, VALID_FLAY_HOOKS_ADDRESS);
     }
 
     function test_CanGetPublicVariables() public view {

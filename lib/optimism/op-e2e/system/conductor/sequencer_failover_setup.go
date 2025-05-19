@@ -77,6 +77,7 @@ func setupSequencerFailoverTest(t *testing.T) (*e2esys.System, map[string]*condu
 	require.NoError(t, c1.client.AddServerAsVoter(ctx, Sequencer2Name, c2.ConsensusEndpoint(), 0))
 	require.NoError(t, c1.client.AddServerAsVoter(ctx, Sequencer3Name, c3.ConsensusEndpoint(), 0))
 	require.True(t, leader(t, ctx, c1))
+	require.False(t, conductorResumed(t, ctx, c1))
 	require.False(t, leader(t, ctx, c2))
 	require.False(t, leader(t, ctx, c3))
 
@@ -176,21 +177,22 @@ func setupHAInfra(t *testing.T, ctx context.Context) (*e2esys.System, map[string
 	out := make(map[string]*conductor)
 
 	// 3 conductors that connects to 1 sequencer each.
-	// initialize all conductors in paused mode
+	// initialize non-leader conductors in paused mode (later we test that bootstrap node is paused implicitly)
 	conductorCfgs := []struct {
 		name      string
 		bootstrap bool
+		paused    bool
 	}{
-		{Sequencer1Name, true}, // one in bootstrap mode so that we can form a cluster.
-		{Sequencer2Name, false},
-		{Sequencer3Name, false},
+		{Sequencer1Name, true, false}, // one in bootstrap mode so that we can form a cluster.
+		{Sequencer2Name, false, true},
+		{Sequencer3Name, false, true},
 	}
 	for _, cfg := range conductorCfgs {
 		cfg := cfg
 		nodePRC := sys.RollupNodes[cfg.name].UserRPC().RPC()
 		engineRPC := sys.EthInstances[cfg.name].UserRPC().RPC()
 
-		conduc, err := setupConductor(t, cfg.name, t.TempDir(), nodePRC, engineRPC, cfg.bootstrap, *sys.RollupConfig)
+		conduc, err := setupConductor(t, cfg.name, t.TempDir(), nodePRC, engineRPC, cfg.bootstrap, cfg.paused, *sys.RollupConfig)
 		require.NoError(t, err, "failed to set up conductor %s", cfg.name)
 		out[cfg.name] = conduc
 		// Signal that the conductor RPC endpoint is ready
@@ -203,7 +205,7 @@ func setupHAInfra(t *testing.T, ctx context.Context) (*e2esys.System, map[string
 func setupConductor(
 	t *testing.T,
 	serverID, dir, nodeRPC, engineRPC string,
-	bootstrap bool,
+	bootstrap bool, paused bool,
 	rollupCfg rollup.Config,
 ) (*conductor, error) {
 	cfg := con.Config{
@@ -211,15 +213,17 @@ func setupConductor(
 		ConsensusPort:           0,  // let the system select a port, avoid conflicts
 		ConsensusAdvertisedAddr: "", // use the local address we bind to
 
-		RaftServerID:          serverID,
-		RaftStorageDir:        dir,
-		RaftBootstrap:         bootstrap,
-		RaftSnapshotInterval:  120 * time.Second,
-		RaftSnapshotThreshold: 8192,
-		RaftTrailingLogs:      10240,
-		NodeRPC:               nodeRPC,
-		ExecutionRPC:          engineRPC,
-		Paused:                true,
+		RaftServerID:           serverID,
+		RaftStorageDir:         dir,
+		RaftBootstrap:          bootstrap,
+		RaftSnapshotInterval:   120 * time.Second,
+		RaftSnapshotThreshold:  8192,
+		RaftTrailingLogs:       10240,
+		RaftHeartbeatTimeout:   1000 * time.Millisecond,
+		RaftLeaderLeaseTimeout: 500 * time.Millisecond,
+		NodeRPC:                nodeRPC,
+		ExecutionRPC:           engineRPC,
+		Paused:                 paused,
 		HealthCheck: con.HealthCheckConfig{
 			Interval:     1, // per test setup, l2 block time is 1s.
 			MinPeerCount: 2, // per test setup, each sequencer has 2 peers

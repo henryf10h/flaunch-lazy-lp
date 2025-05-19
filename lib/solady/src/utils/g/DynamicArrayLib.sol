@@ -32,8 +32,8 @@ library DynamicArrayLib {
 
     // Low level minimalist uint256 array operations.
     // If you don't need syntax sugar, it's recommended to use these.
-    // Some of these functions returns the same array for function chaining.
-    // `e.g. `array.set(0, 1).set(1, 2)`.
+    // Some of these functions return the same array for function chaining.
+    // e.g. `array.set(0, 1).set(1, 2)`.
 
     /// @dev Returns a uint256 array with `n` elements. The elements are not zeroized.
     function malloc(uint256 n) internal pure returns (uint256[] memory result) {
@@ -50,7 +50,7 @@ library DynamicArrayLib {
         /// @solidity memory-safe-assembly
         assembly {
             result := a
-            codecopy(add(result, 0x20), codesize(), shl(5, mload(result)))
+            calldatacopy(add(result, 0x20), calldatasize(), shl(5, mload(result)))
         }
     }
 
@@ -244,14 +244,39 @@ library DynamicArrayLib {
                 mstore(result, resultLen)
                 a := add(a, shl(5, start))
                 // Copy the `a` one word at a time, backwards.
-                let o := add(shl(5, resultLen), 0x20)
-                mstore(0x40, add(result, o)) // Allocate memory.
+                let o := shl(5, resultLen)
+                mstore(0x40, add(add(result, o), 0x20)) // Allocate memory.
                 for {} 1 {} {
                     mstore(add(result, o), mload(add(a, o)))
                     o := sub(o, 0x20)
                     if iszero(o) { break }
                 }
             }
+        }
+    }
+
+    /// @dev Returns a copy of `a` sliced from `start` to the end of the array.
+    function slice(uint256[] memory a, uint256 start)
+        internal
+        pure
+        returns (uint256[] memory result)
+    {
+        result = slice(a, start, type(uint256).max);
+    }
+
+    /// @dev Returns a copy of the array.
+    function copy(uint256[] memory a) internal pure returns (uint256[] memory result) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            result := mload(0x40)
+            let end := add(add(result, 0x20), shl(5, mload(a)))
+            let o := result
+            for { let d := sub(a, result) } 1 {} {
+                mstore(o, mload(add(o, d)))
+                o := add(0x20, o)
+                if eq(o, end) { break }
+            }
+            mstore(0x40, o)
         }
     }
 
@@ -326,6 +351,7 @@ library DynamicArrayLib {
 
     /// @dev Directly returns `a` without copying.
     function directReturn(uint256[] memory a) internal pure {
+        /// @solidity memory-safe-assembly
         assembly {
             let retStart := sub(a, 0x20)
             mstore(retStart, 0x20)
@@ -337,8 +363,8 @@ library DynamicArrayLib {
     /*                  DYNAMIC ARRAY OPERATIONS                  */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-    // Some of these functions returns the same array for function chaining.
-    // `e.g. `a.p("1").p("2")`.
+    // Some of these functions return the same array for function chaining.
+    // e.g. `a.p("1").p("2")`.
 
     /// @dev Shorthand for `a.data.length`.
     function length(DynamicArray memory a) internal pure returns (uint256) {
@@ -419,7 +445,9 @@ library DynamicArrayLib {
             let arrData := mload(result)
             let arrLen := mload(arrData)
             if iszero(lt(n, arrLen)) {
-                codecopy(add(arrData, shl(5, add(1, arrLen))), codesize(), shl(5, sub(n, arrLen)))
+                calldatacopy(
+                    add(arrData, shl(5, add(1, arrLen))), calldatasize(), shl(5, sub(n, arrLen))
+                )
             }
             mstore(arrData, n)
         }
@@ -543,7 +571,7 @@ library DynamicArrayLib {
                 // Approximately more than double the capacity to ensure more than enough space.
                 let newCap := add(cap, or(cap, newArrBytesLen))
                 // If the memory is contiguous, we can simply expand it.
-                if iszero(or(xor(mload(0x40), add(arrData, add(0x20, cap))), eq(arrData, 0x60))) {
+                if iszero(or(xor(mload(0x40), add(arrData, add(0x20, cap))), iszero(cap))) {
                     mstore(sub(arrData, 0x20), mul(prime, newCap)) // Store the capacity.
                     mstore(0x40, add(arrData, add(0x20, newCap))) // Expand the memory allocation.
                     break
@@ -839,6 +867,11 @@ library DynamicArrayLib {
         result.data = slice(a.data, start, type(uint256).max);
     }
 
+    /// @dev Returns a copy of `a`.
+    function copy(DynamicArray memory a) internal pure returns (DynamicArray memory result) {
+        result.data = copy(a.data);
+    }
+
     /// @dev Returns if `needle` is in `a`.
     function contains(DynamicArray memory a, uint256 needle) internal pure returns (bool) {
         return ~indexOf(a.data, needle, 0) != 0;
@@ -960,6 +993,7 @@ library DynamicArrayLib {
 
     /// @dev Directly returns `a` without copying.
     function directReturn(DynamicArray memory a) internal pure {
+        /// @solidity memory-safe-assembly
         assembly {
             let arrData := mload(a)
             let retStart := sub(arrData, 0x20)
@@ -972,7 +1006,7 @@ library DynamicArrayLib {
     /*                      PRIVATE HELPERS                       */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-    /// @dev Helper for deallocating a automatically allocated array pointer.
+    /// @dev Helper for deallocating an automatically allocated array pointer.
     function _deallocate(DynamicArray memory result) private pure {
         /// @solidity memory-safe-assembly
         assembly {

@@ -1,31 +1,5 @@
 [
   {
-    "inputs": [],
-    "name": "blockNumber",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "chainId",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
     "inputs": [
       {
         "components": [
@@ -60,78 +34,20 @@
         "type": "tuple"
       },
       {
-        "internalType": "address",
-        "name": "_target",
-        "type": "address"
-      },
-      {
-        "internalType": "bytes",
-        "name": "_message",
-        "type": "bytes"
+        "internalType": "bytes32",
+        "name": "_msgHash",
+        "type": "bytes32"
       }
     ],
-    "name": "executeMessage",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "interopStart",
+    "name": "calculateChecksum",
     "outputs": [
       {
-        "internalType": "uint256",
-        "name": "interopStart_",
-        "type": "uint256"
+        "internalType": "bytes32",
+        "name": "checksum_",
+        "type": "bytes32"
       }
     ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "logIndex",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "origin",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "setInteropStart",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "timestamp",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
+    "stateMutability": "pure",
     "type": "function"
   },
   {
@@ -240,17 +156,12 @@
   },
   {
     "inputs": [],
-    "name": "InteropStartAlreadySet",
+    "name": "BlockNumberTooHigh",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "InvalidChainId",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidTimestamp",
+    "name": "LogIndexTooHigh",
     "type": "error"
   },
   {
@@ -260,22 +171,12 @@
   },
   {
     "inputs": [],
-    "name": "NotDepositor",
+    "name": "NotInAccessList",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "NotEntered",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ReentrantCall",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "TargetCallFailed",
+    "name": "TimestampTooHigh",
     "type": "error"
   }
 ]

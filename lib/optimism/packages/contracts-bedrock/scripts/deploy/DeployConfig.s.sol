@@ -30,6 +30,8 @@ contract DeployConfig is Script {
     uint256 public l2GenesisFjordTimeOffset;
     uint256 public l2GenesisGraniteTimeOffset;
     uint256 public l2GenesisHoloceneTimeOffset;
+    uint256 public l2GenesisIsthmusTimeOffset;
+    uint256 public l2GenesisJovianTimeOffset;
     uint256 public maxSequencerDrift;
     uint256 public sequencerWindowSize;
     uint256 public channelTimeout;
@@ -59,6 +61,8 @@ contract DeployConfig is Script {
     uint256 public l2GenesisBlockGasLimit;
     uint32 public basefeeScalar;
     uint32 public blobbasefeeScalar;
+    uint32 public operatorFeeScalar;
+    uint64 public operatorFeeConstant;
     bool public enableGovernance;
     uint256 public eip1559Denominator;
     uint256 public eip1559Elasticity;
@@ -78,7 +82,6 @@ contract DeployConfig is Script {
     uint256 public proofMaturityDelaySeconds;
     uint256 public disputeGameFinalityDelaySeconds;
     uint256 public respectedGameType;
-    bool public useFaultProofs;
     bool public useAltDA;
     string public daCommitmentType;
     uint256 public daChallengeWindow;
@@ -86,10 +89,8 @@ contract DeployConfig is Script {
     uint256 public daBondSize;
     uint256 public daResolverRefundPercentage;
 
-    bool public useCustomGasToken;
-    address public customGasTokenAddress;
-
     bool public useInterop;
+    bool public useUpgradedFork;
 
     function read(string memory _path) public {
         console.log("DeployConfig: reading file %s", _path);
@@ -110,6 +111,8 @@ contract DeployConfig is Script {
         l2GenesisFjordTimeOffset = _readOr(_json, "$.l2GenesisFjordTimeOffset", NULL_OFFSET);
         l2GenesisGraniteTimeOffset = _readOr(_json, "$.l2GenesisGraniteTimeOffset", NULL_OFFSET);
         l2GenesisHoloceneTimeOffset = _readOr(_json, "$.l2GenesisHoloceneTimeOffset", NULL_OFFSET);
+        l2GenesisIsthmusTimeOffset = _readOr(_json, "$.l2GenesisIsthmusTimeOffset", NULL_OFFSET);
+        l2GenesisJovianTimeOffset = _readOr(_json, "$.l2GenesisJovianTimeOffset", NULL_OFFSET);
 
         maxSequencerDrift = stdJson.readUint(_json, "$.maxSequencerDrift");
         sequencerWindowSize = stdJson.readUint(_json, "$.sequencerWindowSize");
@@ -140,15 +143,16 @@ contract DeployConfig is Script {
         l2GenesisBlockGasLimit = stdJson.readUint(_json, "$.l2GenesisBlockGasLimit");
         basefeeScalar = uint32(_readOr(_json, "$.gasPriceOracleBaseFeeScalar", 1368));
         blobbasefeeScalar = uint32(_readOr(_json, "$.gasPriceOracleBlobBaseFeeScalar", 810949));
+        operatorFeeScalar = uint32(_readOr(_json, "$.gasPriceOracleOperatorFeeScalar", 0));
+        operatorFeeConstant = uint64(_readOr(_json, "$.gasPriceOracleOperatorFeeConstant", 0));
 
-        enableGovernance = stdJson.readBool(_json, "$.enableGovernance");
+        enableGovernance = _readOr(_json, "$.enableGovernance", false);
         eip1559Denominator = stdJson.readUint(_json, "$.eip1559Denominator");
         eip1559Elasticity = stdJson.readUint(_json, "$.eip1559Elasticity");
         systemConfigStartBlock = stdJson.readUint(_json, "$.systemConfigStartBlock");
         requiredProtocolVersion = stdJson.readUint(_json, "$.requiredProtocolVersion");
         recommendedProtocolVersion = stdJson.readUint(_json, "$.recommendedProtocolVersion");
 
-        useFaultProofs = _readOr(_json, "$.useFaultProofs", false);
         proofMaturityDelaySeconds = _readOr(_json, "$.proofMaturityDelaySeconds", 0);
         disputeGameFinalityDelaySeconds = _readOr(_json, "$.disputeGameFinalityDelaySeconds", 0);
         respectedGameType = _readOr(_json, "$.respectedGameType", 0);
@@ -172,10 +176,8 @@ contract DeployConfig is Script {
         daBondSize = _readOr(_json, "$.daBondSize", 1000000000);
         daResolverRefundPercentage = _readOr(_json, "$.daResolverRefundPercentage", 0);
 
-        useCustomGasToken = _readOr(_json, "$.useCustomGasToken", false);
-        customGasTokenAddress = _readOr(_json, "$.customGasTokenAddress", address(0));
-
         useInterop = _readOr(_json, "$.useInterop", false);
+        useUpgradedFork;
     }
 
     function fork() public view returns (Fork fork_) {
@@ -222,11 +224,6 @@ contract DeployConfig is Script {
         useAltDA = _useAltDA;
     }
 
-    /// @notice Allow the `useFaultProofs` config to be overridden in testing environments
-    function setUseFaultProofs(bool _useFaultProofs) public {
-        useFaultProofs = _useFaultProofs;
-    }
-
     /// @notice Allow the `useInterop` config to be overridden in testing environments
     function setUseInterop(bool _useInterop) public {
         useInterop = _useInterop;
@@ -237,10 +234,15 @@ contract DeployConfig is Script {
         fundDevAccounts = _fundDevAccounts;
     }
 
-    /// @notice Allow the `useCustomGasToken` config to be overridden in testing environments
-    function setUseCustomGasToken(address _token) public {
-        useCustomGasToken = true;
-        customGasTokenAddress = _token;
+    /// @notice Allow the `useUpgradedFork` config to be overridden in testing environments
+    /// @dev When true, the forked system WILL be upgraded in setUp().
+    ///      When false, the forked system WILL NOT be upgraded in setUp().
+    ///      This function does nothing when not testing in a forked environment.
+    ///      Generally the only time you should call this function is if you want to
+    ///      call opcm.upgrade() in the test itself, rather than have the upgraded
+    ///      system be deployed in setUp().
+    function setUseUpgradedFork(bool _useUpgradedFork) public {
+        useUpgradedFork = _useUpgradedFork;
     }
 
     function latestGenesisFork() internal view returns (Fork) {

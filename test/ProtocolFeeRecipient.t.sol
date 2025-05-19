@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IPoolManager} from '@uniswap/v4-core/src/interfaces/IPoolManager.sol';
-import {PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
+import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
+import {PoolIdLibrary, PoolId} from '@uniswap/v4-core/src/types/PoolId.sol';
 
-import {FeeDistributor} from '@flaunch/hooks/FeeDistributor.sol';
+import {FeeEscrow} from '@flaunch/escrows/FeeEscrow.sol';
+import {PositionManager} from '@flaunch/PositionManager.sol';
 import {ProtocolFeeRecipient} from '@flaunch/ProtocolFeeRecipient.sol';
 
-import {PositionManagerMock} from './mocks/PositionManagerMock.sol';
 import {FlaunchTest} from './FlaunchTest.sol';
 
 
 contract ProtocolFeeRecipientTest is FlaunchTest {
+
+    using PoolIdLibrary for PoolKey;
 
     ProtocolFeeRecipient protocolFeeRecipient;
 
@@ -29,22 +31,26 @@ contract ProtocolFeeRecipientTest is FlaunchTest {
     function test_CanGetAvailable(uint64 _eth, uint64 _pm1, uint64 _pm2) public {
         deal(address(protocolFeeRecipient), _eth);
 
-        PositionManagerMock pmm1 = _deployPositionManagerMock(0x046705475b26a3cFF04Ce91f658b4AE2f8Eb2fDC);
-        PositionManagerMock pmm2 = _deployPositionManagerMock(0x123705475B26A3cFf04CE91f658b4ae2f8eb2fdc);
+        FeeEscrow feeEscrow1 = new FeeEscrow(address(flETH), address(indexer));
+        FeeEscrow feeEscrow2 = new FeeEscrow(address(flETH), address(indexer));
 
-        protocolFeeRecipient.setPositionManager(address(pmm1), true);
-        protocolFeeRecipient.setPositionManager(address(pmm2), true);
+        // Approve fees to be transferred to the escrows
+        flETH.approve(address(feeEscrow1), type(uint).max);
+        flETH.approve(address(feeEscrow2), type(uint).max);
 
-        PoolId mockPoolId = PoolId.wrap('PoolId');
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow1), true);
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow2), true);
+
+        PoolId poolId = _flaunchToken();
 
         if (_pm1 != 0) {
-            flETH.transfer(address(pmm1), _pm1);
-            pmm1.allocateFeesMock(mockPoolId, address(protocolFeeRecipient), _pm1);
+            flETH.transfer(address(feeEscrow1), _pm1);
+            feeEscrow1.allocateFees(poolId, address(protocolFeeRecipient), _pm1);
         }
 
         if (_pm2 != 0) {
-            flETH.transfer(address(pmm2), _pm2);
-            pmm2.allocateFeesMock(mockPoolId, address(protocolFeeRecipient), _pm2);
+            flETH.transfer(address(feeEscrow2), _pm2);
+            feeEscrow2.allocateFees(poolId, address(protocolFeeRecipient), _pm2);
         }
 
         // We should be able to see the total amount available
@@ -61,22 +67,26 @@ contract ProtocolFeeRecipientTest is FlaunchTest {
 
         deal(address(protocolFeeRecipient), _eth);
 
-        PositionManagerMock pmm1 = _deployPositionManagerMock(0x046705475b26a3cFF04Ce91f658b4AE2f8Eb2fDC);
-        PositionManagerMock pmm2 = _deployPositionManagerMock(0x123705475B26A3cFf04CE91f658b4ae2f8eb2fdc);
+        FeeEscrow feeEscrow1 = new FeeEscrow(address(flETH), address(indexer));
+        FeeEscrow feeEscrow2 = new FeeEscrow(address(flETH), address(indexer));
 
-        protocolFeeRecipient.setPositionManager(address(pmm1), true);
-        protocolFeeRecipient.setPositionManager(address(pmm2), true);
+        // Approve fees to be transferred to the escrows
+        flETH.approve(address(feeEscrow1), type(uint).max);
+        flETH.approve(address(feeEscrow2), type(uint).max);
 
-        PoolId mockPoolId = PoolId.wrap('PoolId');
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow1), true);
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow2), true);
+
+        PoolId poolId = _flaunchToken();
 
         if (_pm1 != 0) {
-            flETH.transfer(address(pmm1), _pm1);
-            pmm1.allocateFeesMock(mockPoolId, address(protocolFeeRecipient), _pm1);
+            flETH.transfer(address(feeEscrow1), _pm1);
+            feeEscrow1.allocateFees(poolId, address(protocolFeeRecipient), _pm1);
         }
 
         if (_pm2 != 0) {
-            flETH.transfer(address(pmm2), _pm2);
-            pmm2.allocateFeesMock(mockPoolId, address(protocolFeeRecipient), _pm2);
+            flETH.transfer(address(feeEscrow2), _pm2);
+            feeEscrow2.allocateFees(poolId, address(protocolFeeRecipient), _pm2);
         }
 
         // We should be able to see the total amount available
@@ -93,45 +103,29 @@ contract ProtocolFeeRecipientTest is FlaunchTest {
         assertEq(payable(address(_recipient)).balance, sentAmount, 'Incorrect recipient ETH received');
     }
 
-    function test_CanAddPositionManager(address _positionManager) public {
-        vm.expectEmit();
-        emit ProtocolFeeRecipient.PositionManagerUpdated(_positionManager, true);
-
-        protocolFeeRecipient.setPositionManager(_positionManager, true);
-    }
-
-    function test_CanRemovePositionManager(address _positionManager) public {
-        protocolFeeRecipient.setPositionManager(_positionManager, true);
+    function test_CanAddFeeEscrow() public {
+        FeeEscrow feeEscrow = new FeeEscrow(address(flETH), address(indexer));
 
         vm.expectEmit();
-        emit ProtocolFeeRecipient.PositionManagerUpdated(_positionManager, false);
+        emit ProtocolFeeRecipient.FeeEscrowUpdated(address(feeEscrow), true);
 
-        protocolFeeRecipient.setPositionManager(_positionManager, false);
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow), true);
     }
 
-    function _deployPositionManagerMock(address _deploymentAddress) internal returns (PositionManagerMock) {
-        FeeDistributor.FeeDistribution memory feeDistribution = FeeDistributor.FeeDistribution({
-            swapFee: 1_00,
-            referrer: 5_00,
-            protocol: 10_00,
-            active: true
-        });
+    function test_CanRemoveFeeEscrow() public {
+        FeeEscrow feeEscrow = new FeeEscrow(address(flETH), address(indexer));
 
-        deployCodeTo('PositionManagerMock.sol', abi.encode(
-            address(WETH),
-            address(poolManager),
-            feeDistribution,
-            address(initialPrice),
-            address(this),
-            address(this),
-            governance,
-            address(feeExemptions),
-            actionManager,
-            bidWall,
-            fairLaunch
-        ), _deploymentAddress);
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow), true);
 
-        return PositionManagerMock(payable(_deploymentAddress));
+        vm.expectEmit();
+        emit ProtocolFeeRecipient.FeeEscrowUpdated(address(feeEscrow), false);
+
+        protocolFeeRecipient.setFeeEscrow(address(feeEscrow), false);
+    }
+
+    function _flaunchToken() internal returns (PoolId poolId_) {
+        address memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', 0, 0, 0, address(this), 0, 0, abi.encode(''), abi.encode(1_000)));
+        return positionManager.poolKey(memecoin).toId();
     }
 
 }

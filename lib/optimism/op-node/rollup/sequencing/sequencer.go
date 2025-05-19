@@ -30,9 +30,11 @@ var (
 
 type L1OriginSelectorIface interface {
 	FindL1Origin(ctx context.Context, l2Head eth.L2BlockRef) (eth.L1BlockRef, error)
+	SetRecoverMode(bool)
 }
 
 type Metrics interface {
+	SetSequencerState(active bool)
 	RecordSequencerInconsistentL1Origin(from eth.BlockID, to eth.BlockID)
 	RecordSequencerReset()
 	RecordSequencingError()
@@ -83,6 +85,8 @@ type Sequencer struct {
 	spec      *rollup.ChainSpec
 
 	maxSafeLag atomic.Uint64
+
+	recoverMode atomic.Bool
 
 	// active identifies whether the sequencer is running.
 	// This is an atomic value, so it can be read without locking the whole sequencer.
@@ -281,10 +285,11 @@ func (d *Sequencer) onBuildSealed(x engine.BuildSealedEvent) {
 	d.asyncGossip.Gossip(x.Envelope)
 	// Now after having gossiped the block, try to put it in our own canonical chain
 	d.emitter.Emit(engine.PayloadProcessEvent{
-		Concluding:  x.Concluding,
-		DerivedFrom: x.DerivedFrom,
-		Envelope:    x.Envelope,
-		Ref:         x.Ref,
+		Concluding:   x.Concluding,
+		DerivedFrom:  x.DerivedFrom,
+		BuildStarted: x.BuildStarted,
+		Envelope:     x.Envelope,
+		Ref:          x.Ref,
 	})
 	d.latest.Ref = x.Ref
 	d.latestSealed = x.Ref
@@ -486,9 +491,13 @@ func (d *Sequencer) startBuildingBlock() {
 		return
 	}
 
+	recoverMode := d.recoverMode.Load()
+
 	// Figure out which L1 origin block we're going to be building on top of.
 	l1Origin, err := d.l1OriginSelector.FindL1Origin(ctx, l2Head)
 	if err != nil {
+		d.nextAction = d.timeNow().Add(time.Second)
+		d.nextActionOK = d.active.Load()
 		d.log.Error("Error finding next L1 Origin", "err", err)
 		d.emitter.Emit(rollup.L1TemporaryErrorEvent{Err: err})
 		return
@@ -541,9 +550,26 @@ func (d *Sequencer) startBuildingBlock() {
 		d.log.Info("Sequencing Fjord upgrade block")
 	}
 
-	// For the Granite activation block we shouldn't include any sequencer transactions.
+	// For the Granite activation block we can include sequencer transactions.
 	if d.rollupCfg.IsGraniteActivationBlock(uint64(attrs.Timestamp)) {
 		d.log.Info("Sequencing Granite upgrade block")
+	}
+
+	// For the Isthmus activation block we shouldn't include any sequencer transactions.
+	if d.rollupCfg.IsIsthmusActivationBlock(uint64(attrs.Timestamp)) {
+		attrs.NoTxPool = true
+		d.log.Info("Sequencing Isthmus upgrade block")
+	}
+
+	// For the Interop activation block we must not include any sequencer transactions.
+	if d.rollupCfg.IsInteropActivationBlock(uint64(attrs.Timestamp)) {
+		attrs.NoTxPool = true
+		d.log.Info("Sequencing Interop upgrade block")
+	}
+
+	if recoverMode {
+		attrs.NoTxPool = true
+		d.log.Warn("Sequencing temporarily without user transactions, in recover mode")
 	}
 
 	d.log.Debug("prepared attributes for new block",
@@ -619,6 +645,7 @@ func (d *Sequencer) Init(ctx context.Context, active bool) error {
 	if active {
 		return d.forceStart()
 	} else {
+		d.metrics.SetSequencerState(false)
 		if err := d.listener.SequencerStopped(); err != nil {
 			return fmt.Errorf("failed to notify sequencer-state listener of initial stopped state: %w", err)
 		}
@@ -652,6 +679,7 @@ func (d *Sequencer) forceStart() error {
 	d.nextActionOK = true
 	d.nextAction = d.timeNow()
 	d.active.Store(true)
+	d.metrics.SetSequencerState(true)
 	d.log.Info("Sequencer has been started", "next action", d.nextAction)
 	return nil
 }
@@ -668,6 +696,16 @@ func (d *Sequencer) Stop(ctx context.Context) (common.Hash, error) {
 
 	// ensure latestHead has been updated to the latest sealed/gossiped block before stopping the sequencer
 	for d.latestHead.Hash != d.latestSealed.Hash {
+
+		// if we are not the leader, latestSealed will never be updated and we will wait forever
+		if isLeader, err := d.conductor.Leader(ctx); err != nil {
+			d.log.Warn("Could not determine leadership while stopping. Skipping wait.", "err", err)
+			break
+		} else if !isLeader {
+			d.log.Info("Not leader anymore, skipping head sync wait")
+			break
+		}
+
 		latestHeadSet := make(chan struct{})
 		d.latestHeadSet = latestHeadSet
 		d.l.Unlock()
@@ -697,6 +735,7 @@ func (d *Sequencer) Stop(ctx context.Context) (common.Hash, error) {
 
 	d.nextActionOK = false
 	d.active.Store(false)
+	d.metrics.SetSequencerState(false)
 	d.log.Info("Sequencer has been stopped")
 	return d.latestHead.Hash, nil
 }
@@ -712,6 +751,11 @@ func (d *Sequencer) OverrideLeader(ctx context.Context) error {
 
 func (d *Sequencer) ConductorEnabled(ctx context.Context) bool {
 	return d.conductor.Enabled(ctx)
+}
+
+func (d *Sequencer) SetRecoverMode(mode bool) {
+	d.l1OriginSelector.SetRecoverMode(mode)
+	d.recoverMode.Store(mode)
 }
 
 func (d *Sequencer) Close() {

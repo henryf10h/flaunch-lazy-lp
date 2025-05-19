@@ -37,7 +37,7 @@ contract BidWallTest is FlaunchTest {
         _deployPlatform();
 
         // Create our memecoin
-        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
         memecoin = MemecoinMock(_memecoin);
 
         uint tokenId = flaunch.tokenId(_memecoin);
@@ -130,7 +130,7 @@ contract BidWallTest is FlaunchTest {
         );
 
         // The swap fee won't have been transferred, but instead allocated
-        assertEq(positionManager.balances(memecoinTreasury), 0.011277785202558418 ether);
+        assertEq(positionManager.feeEscrow().balances(memecoinTreasury), 0.011277785202558418 ether);
 
         // Check the pool has no pending fees for the bidwall
         (,,,, uint pendingETHFees,) = bidWall.poolInfo(poolKey.toId());
@@ -161,7 +161,7 @@ contract BidWallTest is FlaunchTest {
         deal(address(WETH), address(poolManager), 1000e27 ether);
 
         // Create our memecoin now that we have might have flipped.
-        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
         memecoin = MemecoinMock(_memecoin);
         memecoinTreasury = flaunch.memecoinTreasury(flaunch.tokenId(_memecoin));
 
@@ -298,7 +298,7 @@ contract BidWallTest is FlaunchTest {
         deal(address(WETH), address(poolManager), 1000e27 ether);
 
         // Create our memecoin now that we have might have flipped.
-        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
+        address _memecoin = positionManager.flaunch(PositionManager.FlaunchParams('name', 'symbol', 'https://token.gg/', supplyShare(50), 30 minutes, 0, address(this), 50_00, 0, abi.encode(''), abi.encode(1_000)));
         memecoin = MemecoinMock(_memecoin);
         memecoinTreasury = flaunch.memecoinTreasury(flaunch.tokenId(_memecoin));
 
@@ -433,7 +433,7 @@ contract BidWallTest is FlaunchTest {
         assertEq(cumulativeSwapFees, expectedFees, 'Invalid cumulativeSwapFees');
 
         // Move past our timeout
-        vm.warp(block.timestamp + bidWall.STALE_TIME_WINDOW());
+        vm.warp(block.timestamp + bidWall.staleTimeWindow());
 
         // Perform another swap that will trigger the stale liquidity to be added
         poolSwap.swap(

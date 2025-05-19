@@ -92,6 +92,19 @@
     },
     {
       "type": "function",
+      "name": "flaunchFeeThreshold",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "getFlaunchingFee",
       "inputs": [
         {
@@ -236,6 +249,19 @@
     },
     {
       "type": "function",
+      "name": "setFlaunchFeeThreshold",
+      "inputs": [
+        {
+          "name": "_flaunchFeeThreshold",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "setPool",
       "inputs": [
         {
@@ -312,6 +338,19 @@
         }
       ],
       "stateMutability": "view"
+    },
+    {
+      "type": "event",
+      "name": "FlaunchFeeThresholdUpdated",
+      "inputs": [
+        {
+          "name": "_flaunchFeeThreshold",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
     },
     {
       "type": "event",

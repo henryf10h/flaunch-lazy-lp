@@ -9,11 +9,11 @@ import { Memecoin } from '@flaunch/Memecoin.sol';
 import { PositionManager } from '@flaunch/PositionManager.sol';
 
 // Libraries
-import { Predeploys } from '@optimism/libraries/Predeploys.sol';
+import { Predeploys } from '@optimism/src/libraries/Predeploys.sol';
 
 // Target contracts
-import { IERC7802, IERC165 } from '@optimism/L2/interfaces/IERC7802.sol';
-import { ISuperchainERC20 } from '@optimism/L2/interfaces/ISuperchainERC20.sol';
+import { IERC7802, IERC165 } from '@optimism/interfaces/L2/IERC7802.sol';
+import { ISuperchainERC20 } from '@optimism/interfaces/L2/ISuperchainERC20.sol';
 
 import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
@@ -45,6 +45,7 @@ contract MemecoinSuperchainERC20Test is FlaunchTest {
                 symbol: 'TOKEN',
                 tokenUri: 'https://flaunch.gg/',
                 initialTokenFairLaunch: supplyShare(50),
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: address(this),
                 creatorFeeAllocation: 20_00,
@@ -92,7 +93,7 @@ contract MemecoinSuperchainERC20Test is FlaunchTest {
 
         // Look for the emit of the `CrosschainMint` event
         vm.expectEmit(address(superchainERC20));
-        emit IERC7802.CrosschainMint(_to, _amount);
+        emit IERC7802.CrosschainMint(_to, _amount, SUPERCHAIN_TOKEN_BRIDGE);
 
         // Call the `mint` function with the bridge caller
         vm.prank(SUPERCHAIN_TOKEN_BRIDGE);
@@ -135,7 +136,7 @@ contract MemecoinSuperchainERC20Test is FlaunchTest {
 
         // Look for the emit of the `CrosschainBurn` event
         vm.expectEmit(address(superchainERC20));
-        emit IERC7802.CrosschainBurn(_from, _amount);
+        emit IERC7802.CrosschainBurn(_from, _amount, SUPERCHAIN_TOKEN_BRIDGE);
 
         // Call the `burn` function with the bridge caller
         vm.prank(SUPERCHAIN_TOKEN_BRIDGE);

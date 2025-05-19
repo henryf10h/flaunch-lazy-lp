@@ -497,6 +497,7 @@ contract MerkleAirdropTest is FlaunchTest {
             symbol: "TEST",
             tokenUri: 'https://token.gg/',
             initialTokenFairLaunch: 0.25e27,
+            fairLaunchDuration: 30 minutes,
             premineAmount: merkleJSON.totalTokensToAirdropInWei,
             creator: address(this),
             creatorFeeAllocation: 0,

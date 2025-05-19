@@ -19,7 +19,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/engine"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/event"
-	"github.com/ethereum-optimism/optimism/op-node/rollup/interop"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sequencing"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -38,6 +37,10 @@ func (m *MockL1OriginSelector) FindL1Origin(ctx context.Context, l2Head eth.L2Bl
 	return m.actual.FindL1Origin(ctx, l2Head)
 }
 
+func (m *MockL1OriginSelector) SetRecoverMode(bool) {
+	// noop
+}
+
 // L2Sequencer is an actor that functions like a rollup node,
 // without the full P2P/API/Node stack, but just the derivation state, and simplified driver with sequencing ability.
 type L2Sequencer struct {
@@ -53,9 +56,8 @@ type L2Sequencer struct {
 
 func NewL2Sequencer(t Testing, log log.Logger, l1 derive.L1Fetcher, blobSrc derive.L1BlobsFetcher,
 	altDASrc driver.AltDAIface, eng L2API, cfg *rollup.Config, seqConfDepth uint64,
-	interopBackend interop.InteropBackend,
 ) *L2Sequencer {
-	ver := NewL2Verifier(t, log, l1, blobSrc, altDASrc, eng, cfg, &sync.Config{}, safedb.Disabled, interopBackend)
+	ver := NewL2Verifier(t, log, l1, blobSrc, altDASrc, eng, cfg, &sync.Config{}, safedb.Disabled)
 	attrBuilder := derive.NewFetchingAttributesBuilder(cfg, l1, eng)
 	seqConfDepthL1 := confdepth.NewConfDepth(seqConfDepth, ver.syncStatus.L1Head, l1)
 	originSelector := sequencing.NewL1OriginSelector(t.Ctx(), log, cfg, seqConfDepthL1)
@@ -206,6 +208,13 @@ func (s *L2Sequencer) ActBuildL2ToTime(t Testing, target uint64) {
 	}
 }
 
+func (s *L2Sequencer) ActBuildL2ToCanyon(t Testing) {
+	require.NotNil(t, s.RollupCfg.CanyonTime, "cannot activate CanyonTime when it is not scheduled")
+	for s.L2Unsafe().Time < *s.RollupCfg.CanyonTime {
+		s.ActL2EmptyBlock(t)
+	}
+}
+
 func (s *L2Sequencer) ActBuildL2ToEcotone(t Testing) {
 	require.NotNil(t, s.RollupCfg.EcotoneTime, "cannot activate Ecotone when it is not scheduled")
 	for s.L2Unsafe().Time < *s.RollupCfg.EcotoneTime {
@@ -230,6 +239,13 @@ func (s *L2Sequencer) ActBuildL2ToGranite(t Testing) {
 func (s *L2Sequencer) ActBuildL2ToHolocene(t Testing) {
 	require.NotNil(t, s.RollupCfg.HoloceneTime, "cannot activate HoloceneTime when it is not scheduled")
 	for s.L2Unsafe().Time < *s.RollupCfg.HoloceneTime {
+		s.ActL2EmptyBlock(t)
+	}
+}
+
+func (s *L2Sequencer) ActBuildL2ToIsthmus(t Testing) {
+	require.NotNil(t, s.RollupCfg.IsthmusTime, "cannot activate IsthmusTime when it is not scheduled")
+	for s.L2Unsafe().Time < *s.RollupCfg.IsthmusTime {
 		s.ActL2EmptyBlock(t)
 	}
 }

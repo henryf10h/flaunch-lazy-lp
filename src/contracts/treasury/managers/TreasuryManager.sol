@@ -14,9 +14,12 @@ import {ITreasuryManager} from '@flaunch-interfaces/ITreasuryManager.sol';
  */
 abstract contract TreasuryManager is ITreasuryManager {
 
+    error AlreadyInitialized();
     error FlaunchContractNotValid();
+    error NotInitialized();
     error NotManagerOwner();
     error TokenTimelocked(uint _unlockedAt);
+    error UnknownFlaunchToken();
 
     event ManagerOwnershipTransferred(address indexed _previousOwner, address indexed _newOwner);
     event TreasuryEscrowed(address indexed _flaunch, uint indexed _tokenId, address _owner, address _sender);
@@ -28,6 +31,9 @@ abstract contract TreasuryManager is ITreasuryManager {
 
     /// The owner of the tokens that are depositted
     address public managerOwner;
+
+    /// If the manager has been initialized
+    bool public initialized;
 
     /// Creates a standardised timelock mechanism for tokens
     mapping (address _flaunch => mapping (uint _tokenId => uint _unlockedAt)) public tokenTimelock;
@@ -42,18 +48,35 @@ abstract contract TreasuryManager is ITreasuryManager {
     }
 
     /**
-     * Escrow an ERC721 token by transferring it to this contract and recording the original
-     * owner.
+     * Initialize the manager contract.
      *
-     * @param _flaunchToken The Flaunch token that is being initialized
      * @param _owner The address to have ownership over the tokens
      * @param _data Additional manager initialization data
      */
-    function initialize(FlaunchToken calldata _flaunchToken, address _owner, bytes calldata _data) public {
-        // Set the owner if one is not already set.
-        if (managerOwner == address(0)) {
-            managerOwner = _owner;
-        }
+    function initialize(address _owner, bytes calldata _data) public {
+        // Check if the manager has already been initialized
+        if (initialized) revert AlreadyInitialized();
+
+        // Mark the manager as initialized
+        initialized = true;
+
+        // Set the owner of the manager
+        managerOwner = _owner;
+
+        // Allow the manager to perform additional logic
+        _initialize(_owner, _data);
+    }
+
+    /**
+     * Once the contract has been initialized, subsequent tokens should be sent via this function.
+     *
+     * @param _flaunchToken The FlaunchToken being depositted
+     * @param _creator The creator of the FlaunchToken
+     * @param _data Additional deposit data for the manager
+     */
+    function deposit(FlaunchToken calldata _flaunchToken, address _creator, bytes calldata _data) public {
+        // Check if the manager has been initialized
+        if (!initialized) revert NotInitialized();
 
         // Validate the Flaunch contract
         if (!_isValidFlaunchContract(address(_flaunchToken.flaunch))) {
@@ -62,19 +85,30 @@ abstract contract TreasuryManager is ITreasuryManager {
 
         // Transfer the token from the msg.sender to the contract
         _flaunchToken.flaunch.transferFrom(msg.sender, address(this), _flaunchToken.tokenId);
-        emit TreasuryEscrowed(address(_flaunchToken.flaunch), _flaunchToken.tokenId, _owner, msg.sender);
+        emit TreasuryEscrowed(address(_flaunchToken.flaunch), _flaunchToken.tokenId, _creator, msg.sender);
 
-        _initialize(_flaunchToken, _data);
+        _deposit(_flaunchToken, _creator, _data);
     }
 
     /**
      * An internal initialization function that is overwritten by the managers that extend
      * this contract.
      *
-     * @param _flaunchToken ..
      * @param _data Additional data bytes that can be unpacked
      */
-    function _initialize(FlaunchToken calldata _flaunchToken, bytes calldata _data) internal virtual {
+    function _initialize(address _owner, bytes calldata _data) internal virtual {
+        // ..
+    }
+
+    /**
+     * An internal deposit function that is overwritten by the managers that extend this
+     * contract.
+     *
+     * @param _flaunchToken The token to deposit
+     * @param _creator The creator of the FlaunchToken
+     * @param _data Additional data bytes that can be unpacked
+     */
+    function _deposit(FlaunchToken calldata _flaunchToken, address _creator, bytes calldata _data) internal virtual {
         // ..
     }
 
@@ -115,7 +149,7 @@ abstract contract TreasuryManager is ITreasuryManager {
      *
      * @param _newManagerOwner The new address that will become the owner
      */
-    function transferOwnership(address _newManagerOwner) public onlyManagerOwner {
+    function transferManagerOwnership(address _newManagerOwner) public onlyManagerOwner {
         emit ManagerOwnershipTransferred(managerOwner, _newManagerOwner);
         managerOwner = _newManagerOwner;
     }
@@ -141,6 +175,6 @@ abstract contract TreasuryManager is ITreasuryManager {
     /**
      * Allows the contract to receive ETH when withdrawn from the flETH token.
      */
-    receive () external payable {}
+    receive () external virtual payable {}
 
 }

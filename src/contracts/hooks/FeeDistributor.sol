@@ -2,7 +2,6 @@
 pragma solidity ^0.8.26;
 
 import {Ownable} from '@solady/auth/Ownable.sol';
-import {SafeTransferLib} from '@solady/utils/SafeTransferLib.sol';
 
 import {Currency} from '@uniswap/v4-core/src/types/Currency.sol';
 import {IPoolManager} from '@uniswap/v4-core/src/interfaces/IPoolManager.sol';
@@ -11,11 +10,11 @@ import {PoolKey} from '@uniswap/v4-core/src/types/PoolKey.sol';
 
 import {FeeExemptions} from '@flaunch/hooks/FeeExemptions.sol';
 import {MemecoinFinder} from '@flaunch/types/MemecoinFinder.sol';
-import {ReferralEscrow} from '@flaunch/referrals/ReferralEscrow.sol';
+import {ReferralEscrow} from '@flaunch/escrows/ReferralEscrow.sol';
+import {FeeEscrow} from '@flaunch/escrows/FeeEscrow.sol';
 
 import {IFeeCalculator} from '@flaunch-interfaces/IFeeCalculator.sol';
 import {IFLETH} from '@flaunch-interfaces/IFLETH.sol';
-import {IMemecoin} from '@flaunch-interfaces/IMemecoin.sol';
 
 
 /**
@@ -38,12 +37,6 @@ abstract contract FeeDistributor is Ownable {
 
     /// Emitted when our `FeeDistribution` struct is modified for a pool
     event PoolFeeDistributionUpdated(PoolId indexed _poolId, FeeDistribution _feeDistribution);
-
-    /// Emitted when fees are added to a payee
-    event Deposit(PoolId indexed _poolId, address _payee, address _token, uint _amount);
-
-    /// Emitted when fees are withdrawn to a payee
-    event Withdrawal(address _sender, address _recipient, address _token, uint _amount);
 
     /// Emitted when our {FeeCalculator} contract is updated
     event FeeCalculatorUpdated(address _feeCalculator);
@@ -91,9 +84,6 @@ abstract contract FeeDistributor is Ownable {
     /// to reduce fees from hitting the bidwall.
     mapping (PoolId _poolId => uint24 _creatorFee) internal creatorFee;
 
-    /// Maps a user to an ETH equivalent token balance available in escrow
-    mapping (address _recipient => uint _amount) public balances;
-
     /// Maps individual pools to custom `FeeDistribution`s. These will overwrite the
     /// global `feeDistribution`.
     mapping (PoolId _poolId => FeeDistribution _feeDistribution) internal poolFeeDistribution;
@@ -107,15 +97,18 @@ abstract contract FeeDistributor is Ownable {
     /// The {ReferralEscrow} contract that will be used
     ReferralEscrow public referralEscrow;
 
+    /// The {FeeEscrow} contract that will be used
+    FeeEscrow public feeEscrow;
+
     /// The {IFeeCalculator} used to calculate swap fees
     IFeeCalculator public feeCalculator;
     IFeeCalculator public fairLaunchFeeCalculator;
 
     /// Our internal native token
-    address public immutable nativeToken;
+    address public nativeToken;
 
     /// The address of the $FLAY token's governance
-    address public immutable flayGovernance;
+    address public flayGovernance;
 
     /**
      * Set up our initial FeeDistribution data.
@@ -124,7 +117,7 @@ abstract contract FeeDistributor is Ownable {
      * @param _feeDistribution The initial FeeDistribution value
      * @param _protocolOwner The initial EOA owner of the contract
      */
-    constructor (address _nativeToken, FeeDistribution memory _feeDistribution, address _protocolOwner, address _flayGovernance) {
+    constructor (address _nativeToken, FeeDistribution memory _feeDistribution, address _protocolOwner, address _flayGovernance, address _feeEscrow) {
         nativeToken = _nativeToken;
 
         // Set our initial fee distribution
@@ -135,6 +128,9 @@ abstract contract FeeDistributor is Ownable {
         // Set our $FLAY token governance address
         flayGovernance = _flayGovernance;
 
+        // Set our fee escrow
+        feeEscrow = FeeEscrow(payable(_feeEscrow));
+
         // Grant ownership permissions to the caller
         if (owner() == address(0)) {
             _initializeOwner(_protocolOwner);
@@ -143,52 +139,20 @@ abstract contract FeeDistributor is Ownable {
 
     /**
      * Allows a deposit to be made against a user. The amount is stored within the
-     * escrow contract to be claimed later.
+     * {FeeEscrow} contract to be claimed later.
      *
      * @param _poolId The PoolId that the deposit came from
      * @param _recipient The recipient of the transferred token
      * @param _amount The amount of the token to be transferred
      */
     function _allocateFees(PoolId _poolId, address _recipient, uint _amount) internal {
-        // If we don't have fees to allocate, exit early
-        if (_amount == 0) return;
-
-        // Ensure we aren't trying to allocate fees to a zero address
-        if (_recipient == address(0)) revert RecipientZeroAddress();
-
-        balances[_recipient] += _amount;
-        emit Deposit(_poolId, _recipient, nativeToken, _amount);
-    }
-
-    /**
-     * Allows fees to be withdrawn from escrowed fee positions.
-     *
-     * @param _recipient The recipient of the holder's withdraw
-     * @param _unwrap If we want to unwrap the balance from flETH into ETH
-     */
-    function withdrawFees(address _recipient, bool _unwrap) public {
-        // Get the amount of token that is stored in escrow
-        uint amount = balances[msg.sender];
-
-        // If there are no fees to withdraw, exit early
-        if (amount == 0) return;
-
-        // Reset our user's balance to prevent reentry
-        balances[msg.sender] = 0;
-
-        // Convert the flETH balance held into native ETH
-        if (_unwrap) {
-            // Handle a withdraw of the withdrawn ETH
-            IFLETH(nativeToken).withdraw(amount);
-            (bool _sent,) = payable(_recipient).call{value: amount}('');
-            require(_sent, 'ETH Transfer Failed');
-            emit Withdrawal(msg.sender, _recipient, address(0), amount);
+        // set allowance so that `feeEscrow` can pull the fees
+        if (IFLETH(nativeToken).allowance(msg.sender, address(feeEscrow)) < _amount) {
+            IFLETH(nativeToken).approve(address(feeEscrow), type(uint).max);
         }
-        // Transfer flETH token without unwrapping
-        else {
-            SafeTransferLib.safeTransfer(nativeToken, _recipient, amount);
-            emit Withdrawal(msg.sender, _recipient, nativeToken, amount);
-        }
+
+        // allocate the fees in the escrow
+        feeEscrow.allocateFees(_poolId, _recipient, _amount);
     }
 
     /**

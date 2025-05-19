@@ -21,6 +21,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/client"
+	opeth "github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/testutils"
 )
@@ -198,6 +199,12 @@ func (s *L1Replica) L1Client(t Testing, cfg *rollup.Config) *sources.L1Client {
 	return l1F
 }
 
+func (s *L1Replica) L1ClientSimple(t Testing) *sources.L1Client {
+	l1F, err := sources.NewL1Client(s.RPCClient(), s.log, nil, sources.L1ClientSimpleConfig(false, sources.RPCKindStandard, 100))
+	require.NoError(t, err)
+	return l1F
+}
+
 func (s *L1Replica) L1Chain() *core.BlockChain {
 	return s.l1Chain
 }
@@ -227,6 +234,30 @@ func (s *L1Replica) FinalizedNum() uint64 {
 		finalizedNum = finalized.Number.Uint64()
 	}
 	return finalizedNum
+}
+
+func (s *L1Replica) UnsafeID() opeth.BlockID {
+	h := s.l1Chain.CurrentBlock()
+	if h == nil {
+		return opeth.BlockID{}
+	}
+	return opeth.HeaderBlockID(h)
+}
+
+func (s *L1Replica) SafeID() opeth.BlockID {
+	h := s.l1Chain.CurrentSafeBlock()
+	if h == nil {
+		return opeth.BlockID{}
+	}
+	return opeth.HeaderBlockID(h)
+}
+
+func (s *L1Replica) FinalizedID() opeth.BlockID {
+	h := s.l1Chain.CurrentFinalBlock()
+	if h == nil {
+		return opeth.BlockID{}
+	}
+	return opeth.HeaderBlockID(h)
 }
 
 // ActL1Finalize finalizes a later block, which must be marked as safe before doing so (see ActL1SafeNext).

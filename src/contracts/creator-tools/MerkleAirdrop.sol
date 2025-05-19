@@ -57,6 +57,7 @@ contract MerkleAirdrop is BaseAirdrop, IMerkleAirdrop {
         // Validate that the airdrop is configurated as expected
         if (_airdropIndex != airdropsCount[_creator]) revert InvalidAirdropIndex();
         if (_airdropData[_creator][_airdropIndex].merkleRoot != bytes32(0)) revert AirdropAlreadyExists();
+        if (_airdropEndTime <= block.timestamp) revert AirdropExpired();
 
         // Pull in the tokens from the sender
         uint amount = _pullTokens(_token, _amount);

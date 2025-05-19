@@ -109,6 +109,7 @@ contract PauseCalculatorTest is FlaunchTest {
                 symbol: 'TOKEN',
                 tokenUri: 'https://flaunch.gg/',
                 initialTokenFairLaunch: supplyShare(50),
+                fairLaunchDuration: 30 minutes,
                 premineAmount: 0,
                 creator: address(this),
                 creatorFeeAllocation: 10_00,

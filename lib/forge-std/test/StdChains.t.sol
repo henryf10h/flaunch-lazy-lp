@@ -24,7 +24,7 @@ contract StdChainsMock is Test {
 contract StdChainsTest is Test {
     function test_ChainRpcInitialization() public {
         // RPCs specified in `foundry.toml` should be updated.
-        assertEq(getChain(1).rpcUrl, "https://eth-mainnet.alchemyapi.io/v2/WV407BEiBmjNJfKo9Uo_55u0z0ITyCOX");
+        assertEq(getChain(1).rpcUrl, "https://eth.merkle.io");
         assertEq(getChain("optimism_sepolia").rpcUrl, "https://sepolia.optimism.io/");
         assertEq(getChain("arbitrum_one_sepolia").rpcUrl, "https://sepolia-rollup.arbitrum.io/rpc/");
 
@@ -36,7 +36,7 @@ contract StdChainsTest is Test {
 
         // Cannot override RPCs defined in `foundry.toml`
         vm.setEnv("MAINNET_RPC_URL", "myoverride2");
-        assertEq(getChain("mainnet").rpcUrl, "https://eth-mainnet.alchemyapi.io/v2/WV407BEiBmjNJfKo9Uo_55u0z0ITyCOX");
+        assertEq(getChain("mainnet").rpcUrl, "https://eth.merkle.io");
 
         // Other RPCs should remain unchanged.
         assertEq(getChain(31337).rpcUrl, "http://127.0.0.1:8545");
@@ -105,9 +105,8 @@ contract StdChainsTest is Test {
         StdChainsMock stdChainsMock = new StdChainsMock();
 
         stdChainsMock.exposed_setChain("needs_undefined_env_var", ChainData("", 123456789, ""));
-        vm.expectRevert(
-            "Failed to resolve env var `UNDEFINED_RPC_URL_PLACEHOLDER` in `${UNDEFINED_RPC_URL_PLACEHOLDER}`: environment variable not found"
-        );
+        // Forge environment variable error.
+        vm.expectRevert();
         stdChainsMock.exposed_getChain("needs_undefined_env_var");
     }
 
@@ -204,13 +203,13 @@ contract StdChainsTest is Test {
         setChain("custom_chain", ChainData("Custom Chain", 123456789, "https://custom.chain/"));
         assertEq(getChain(123456789).chainId, 123456789);
 
-        setChain("custom_chain", ChainData("Modified Chain", 999999999, "https://modified.chain/"));
+        setChain("custom_chain", ChainData("Modified Chain", 9999999999999999999, "https://modified.chain/"));
         vm.expectRevert("StdChains getChain(uint256): Chain with ID 123456789 not found.");
         stdChainsMock.exposed_getChain(123456789);
 
-        Chain memory modifiedChain = getChain(999999999);
+        Chain memory modifiedChain = getChain(9999999999999999999);
         assertEq(modifiedChain.name, "Modified Chain");
-        assertEq(modifiedChain.chainId, 999999999);
+        assertEq(modifiedChain.chainId, 9999999999999999999);
         assertEq(modifiedChain.rpcUrl, "https://modified.chain/");
     }
 

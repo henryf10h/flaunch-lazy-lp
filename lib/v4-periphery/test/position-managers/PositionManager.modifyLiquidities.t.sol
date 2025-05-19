@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
+import {IERC721} from "forge-std/interfaces/IERC721.sol";
 
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
@@ -10,7 +11,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
@@ -18,34 +19,41 @@ import {Position} from "@uniswap/v4-core/src/libraries/Position.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {Pool} from "@uniswap/v4-core/src/libraries/Pool.sol";
+
+import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 import {IPositionManager} from "../../src/interfaces/IPositionManager.sol";
 import {IMulticall_v4} from "../../src/interfaces/IMulticall_v4.sol";
 import {ReentrancyLock} from "../../src/base/ReentrancyLock.sol";
 import {Actions} from "../../src/libraries/Actions.sol";
-import {PositionManager} from "../../src/PositionManager.sol";
 import {PositionConfig} from "../shared/PositionConfig.sol";
+import {BipsLibrary} from "../../src/libraries/BipsLibrary.sol";
 
 import {LiquidityFuzzers} from "../shared/fuzz/LiquidityFuzzers.sol";
 import {Planner, Plan} from "../shared/Planner.sol";
 import {PosmTestSetup} from "../shared/PosmTestSetup.sol";
 import {ActionConstants} from "../../src/libraries/ActionConstants.sol";
-import {Planner, Plan} from "../shared/Planner.sol";
 import {DeltaResolver} from "../../src/base/DeltaResolver.sol";
+import {MockFOT} from "../mocks/MockFeeOnTransfer.sol";
 
 contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityFuzzers {
     using StateLibrary for IPoolManager;
-    using PoolIdLibrary for PoolKey;
-    using Planner for Plan;
+    using BipsLibrary for uint256;
 
     PoolId poolId;
     address alice;
     uint256 alicePK;
     address bob;
 
+    PoolKey fotKey;
+
     PositionConfig config;
     PositionConfig wethConfig;
     PositionConfig nativeConfig;
+    PositionConfig fotConfig;
+
+    MockERC20 fotToken;
 
     function setUp() public {
         (alice, alicePK) = makeAddrAndKey("ALICE");
@@ -66,7 +74,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         seedBalance(address(hookModifyLiquidities));
 
         (key, poolId) = initPool(currency0, currency1, IHooks(hookModifyLiquidities), 3000, SQRT_PRICE_1_1);
-        initWethPool(currency1, IHooks(address(0)), 3000, SQRT_PRICE_1_1);
+        wethKey = initPoolUnsorted(Currency.wrap(address(_WETH9)), currency1, IHooks(address(0)), 3000, SQRT_PRICE_1_1);
 
         seedWeth(address(this));
         approvePosmCurrency(Currency.wrap(address(_WETH9)));
@@ -83,6 +91,11 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         nativeConfig = PositionConfig({poolKey: nativeKey, tickLower: -120, tickUpper: 120});
 
         vm.deal(address(this), 1000 ether);
+
+        fotToken = new MockFOT(lpm);
+        approvePosmCurrency(Currency.wrap(address(fotToken)));
+        seedToken(fotToken, address(this));
+        fotKey = initPoolUnsorted(Currency.wrap(address(fotToken)), currency1, IHooks(address(0)), 3000, SQRT_PRICE_1_1);
     }
 
     /// @dev minting liquidity without approval is allowable
@@ -107,8 +120,8 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         liquidity = lpm.getPositionLiquidity(hookTokenId);
         assertEq(liquidity, newLiquidity);
 
-        assertEq(lpm.ownerOf(tokenId), address(this)); // original position owned by this contract
-        assertEq(lpm.ownerOf(hookTokenId), address(hookModifyLiquidities)); // hook position owned by hook
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this)); // original position owned by this contract
+        assertEq(IERC721(address(lpm)).ownerOf(hookTokenId), address(hookModifyLiquidities)); // hook position owned by hook
     }
 
     /// @dev hook must be approved to increase liquidity
@@ -118,7 +131,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         mint(config, initialLiquidity, address(this), ZERO_BYTES);
 
         // approve the hook for increasing liquidity
-        lpm.approve(address(hookModifyLiquidities), tokenId);
+        IERC721(address(lpm)).approve(address(hookModifyLiquidities), tokenId);
 
         // hook increases liquidity in beforeSwap via hookData
         uint256 newLiquidity = 10e18;
@@ -138,7 +151,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         mint(config, initialLiquidity, address(this), ZERO_BYTES);
 
         // approve the hook for decreasing liquidity
-        lpm.approve(address(hookModifyLiquidities), tokenId);
+        IERC721(address(lpm)).approve(address(hookModifyLiquidities), tokenId);
 
         // hook decreases liquidity in beforeSwap via hookData
         uint256 liquidityToDecrease = 10e18;
@@ -158,7 +171,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         mint(config, initialLiquidity, address(this), ZERO_BYTES);
 
         // approve the hook for collecting liquidity
-        lpm.approve(address(hookModifyLiquidities), tokenId);
+        IERC721(address(lpm)).approve(address(hookModifyLiquidities), tokenId);
 
         // donate to generate revenue
         uint256 feeRevenue0 = 1e18;
@@ -196,7 +209,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         BalanceDelta mintDelta = hookModifyLiquidities.deltas(hookModifyLiquidities.numberDeltasReturned() - 1);
 
         // approve the hook for burning liquidity
-        lpm.approve(address(hookModifyLiquidities), tokenId);
+        IERC721(address(lpm)).approve(address(hookModifyLiquidities), tokenId);
 
         uint256 balance0HookBefore = currency0.balanceOf(address(hookModifyLiquidities));
         uint256 balance1HookBefore = currency1.balanceOf(address(hookModifyLiquidities));
@@ -211,7 +224,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         assertEq(liquidity, 0);
         // 721 will revert if the token does not exist
         vm.expectRevert();
-        lpm.ownerOf(tokenId);
+        IERC721(address(lpm)).ownerOf(tokenId);
 
         // hook claimed the burned liquidity
         assertEq(
@@ -401,7 +414,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         // The full eth amount was "spent" because some was wrapped into weth and refunded.
         assertApproxEqAbs(balanceEthBefore - balanceEthAfter, 102 ether, 1 wei);
         assertApproxEqAbs(balance1Before - balance1After, 100 ether, 1 wei);
-        assertEq(lpm.ownerOf(tokenId), address(this));
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
         assertEq(lpm.getPositionLiquidity(tokenId), liquidityAmount);
         assertEq(_WETH9.balanceOf(address(lpm)), 0);
         assertEq(address(lpm).balance, 0);
@@ -463,7 +476,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         // Approx 100 eth was spent because the extra 2 were refunded.
         assertApproxEqAbs(balanceEthBefore - balanceEthAfter, 100 ether, 1 wei);
         assertApproxEqAbs(balance1Before - balance1After, 100 ether, 1 wei);
-        assertEq(lpm.ownerOf(tokenId), address(this));
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
         assertEq(lpm.getPositionLiquidity(tokenId), liquidityAmount);
         assertEq(_WETH9.balanceOf(address(lpm)), 0);
         assertEq(address(lpm).balance, 0);
@@ -523,7 +536,7 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
         // The full eth amount was "spent" because some was wrapped into weth and refunded.
         assertApproxEqAbs(balanceEthBefore - balanceEthAfter, 100 ether, 1 wei);
         assertApproxEqAbs(balance1Before - balance1After, 100 ether, 1 wei);
-        assertEq(lpm.ownerOf(tokenId), address(this));
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
         assertEq(lpm.getPositionLiquidity(tokenId), liquidityAmount);
         assertEq(_WETH9.balanceOf(address(lpm)), 0);
         assertEq(address(lpm).balance, 0);
@@ -693,5 +706,279 @@ contract PositionManagerModifyLiquiditiesTest is Test, PosmTestSetup, LiquidityF
 
         vm.expectRevert(DeltaResolver.InsufficientBalance.selector);
         lpm.modifyLiquidities(actions, _deadline);
+    }
+
+    function test_mintFromDeltas_fot() public {
+        // Use a 1% fee.
+        MockFOT(address(fotToken)).setFee(100);
+        uint256 tokenId = lpm.nextTokenId();
+
+        uint256 fotBalanceBefore = Currency.wrap(address(fotToken)).balanceOf(address(this));
+
+        uint256 amountAfterTransfer = 990e18;
+        uint256 amountToSendFot = 1000e18;
+
+        (uint256 amount0, uint256 amount1) = fotKey.currency0 == Currency.wrap(address(fotToken))
+            ? (amountToSendFot, amountAfterTransfer)
+            : (amountAfterTransfer, amountToSendFot);
+
+        // Calculcate the expected liquidity from the amounts after the transfer. They are the same for both currencies.
+        uint256 expectedLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+            SQRT_PRICE_1_1,
+            TickMath.getSqrtPriceAtTick(LIQUIDITY_PARAMS.tickLower),
+            TickMath.getSqrtPriceAtTick(LIQUIDITY_PARAMS.tickUpper),
+            amountAfterTransfer,
+            amountAfterTransfer
+        );
+
+        Plan memory planner = Planner.init();
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency0, amount0, true));
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency1, amount1, true));
+        planner.add(
+            Actions.MINT_POSITION_FROM_DELTAS,
+            abi.encode(
+                fotKey,
+                LIQUIDITY_PARAMS.tickLower,
+                LIQUIDITY_PARAMS.tickUpper,
+                MAX_SLIPPAGE_INCREASE,
+                MAX_SLIPPAGE_INCREASE,
+                ActionConstants.MSG_SENDER,
+                ZERO_BYTES
+            )
+        );
+
+        bytes memory plan = planner.encode();
+
+        lpm.modifyLiquidities(plan, _deadline);
+
+        uint256 fotBalanceAfter = Currency.wrap(address(fotToken)).balanceOf(address(this));
+
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
+        assertEq(lpm.getPositionLiquidity(tokenId), expectedLiquidity);
+        assertEq(fotBalanceBefore - fotBalanceAfter, 1000e18);
+    }
+
+    function test_increaseFromDeltas() public {
+        uint128 initialLiquidity = 1000e18;
+        uint256 tokenId = lpm.nextTokenId();
+        fotConfig = PositionConfig({poolKey: fotKey, tickLower: -120, tickUpper: 120});
+
+        mint(fotConfig, initialLiquidity, address(this), ZERO_BYTES);
+
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
+        assertEq(lpm.getPositionLiquidity(tokenId), initialLiquidity);
+
+        Plan memory planner = Planner.init();
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency0, 10e18, true));
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency1, 10e18, true));
+        planner.add(
+            Actions.INCREASE_LIQUIDITY_FROM_DELTAS,
+            abi.encode(tokenId, MAX_SLIPPAGE_INCREASE, MAX_SLIPPAGE_INCREASE, ZERO_BYTES)
+        );
+
+        bytes memory actions = planner.encode();
+
+        lpm.modifyLiquidities(actions, _deadline);
+
+        uint128 newLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+            SQRT_PRICE_1_1,
+            TickMath.getSqrtPriceAtTick(fotConfig.tickLower),
+            TickMath.getSqrtPriceAtTick(fotConfig.tickUpper),
+            10e18,
+            10e18
+        );
+
+        assertEq(lpm.getPositionLiquidity(tokenId), initialLiquidity + newLiquidity);
+    }
+
+    function test_increaseFromDeltas_fot() public {
+        uint128 initialLiquidity = 1000e18;
+        uint256 tokenId = lpm.nextTokenId();
+        fotConfig = PositionConfig({poolKey: fotKey, tickLower: -120, tickUpper: 120});
+
+        mint(fotConfig, initialLiquidity, address(this), ZERO_BYTES);
+
+        assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
+        assertEq(lpm.getPositionLiquidity(tokenId), initialLiquidity);
+
+        // Use a 1% fee.
+        MockFOT(address(fotToken)).setFee(100);
+
+        // Set the fee on transfer amount 1% higher.
+        (uint256 amount0, uint256 amount1) =
+            fotKey.currency0 == Currency.wrap(address(fotToken)) ? (100e18, 99e18) : (99e18, 100e18);
+
+        Plan memory planner = Planner.init();
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency0, amount0, true));
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency1, amount1, true));
+        planner.add(
+            Actions.INCREASE_LIQUIDITY_FROM_DELTAS,
+            abi.encode(tokenId, MAX_SLIPPAGE_INCREASE, MAX_SLIPPAGE_INCREASE, ZERO_BYTES)
+        );
+
+        bytes memory actions = planner.encode();
+
+        lpm.modifyLiquidities(actions, _deadline);
+
+        (uint256 amount0AfterTransfer, uint256 amount1AfterTransfer) =
+            fotKey.currency0 == Currency.wrap(address(fotToken)) ? (99e18, 100e18) : (100e18, 99e18);
+
+        uint128 newLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+            SQRT_PRICE_1_1,
+            TickMath.getSqrtPriceAtTick(fotConfig.tickLower),
+            TickMath.getSqrtPriceAtTick(fotConfig.tickUpper),
+            amount0AfterTransfer,
+            amount1AfterTransfer
+        );
+
+        assertEq(lpm.getPositionLiquidity(tokenId), initialLiquidity + newLiquidity);
+    }
+
+    struct BalanceDiff {
+        uint256 _before;
+        uint256 _after;
+    }
+
+    struct Balance {
+        uint256 _0;
+        uint256 _1;
+    }
+
+    function test_fuzz_mintFromDeltas_burn_fot(
+        uint256 bips,
+        uint256 amount0,
+        uint256 amount1,
+        int24 tickLower,
+        int24 tickUpper
+    ) public {
+        bips = bound(bips, 1, 10_000);
+        MockFOT(address(fotToken)).setFee(bips);
+        tickLower = int24(
+            bound(
+                tickLower,
+                fotKey.tickSpacing * (TickMath.MIN_TICK / fotKey.tickSpacing),
+                fotKey.tickSpacing * (TickMath.MAX_TICK / fotKey.tickSpacing)
+            )
+        );
+        tickUpper = int24(
+            bound(
+                tickUpper,
+                fotKey.tickSpacing * (TickMath.MIN_TICK / fotKey.tickSpacing),
+                fotKey.tickSpacing * (TickMath.MAX_TICK / fotKey.tickSpacing)
+            )
+        );
+
+        tickLower = fotKey.tickSpacing * (tickLower / fotKey.tickSpacing);
+        tickUpper = fotKey.tickSpacing * (tickUpper / fotKey.tickSpacing);
+        vm.assume(tickUpper > tickLower);
+
+        (uint160 sqrtPriceX96,,,) = manager.getSlot0(fotKey.toId());
+        {
+            uint128 maxLiquidityPerTick = Pool.tickSpacingToMaxLiquidityPerTick(fotKey.tickSpacing);
+            (uint256 maxAmount0, uint256 maxAmount1) = LiquidityAmounts.getAmountsForLiquidity(
+                sqrtPriceX96,
+                TickMath.getSqrtPriceAtTick(tickLower),
+                TickMath.getSqrtPriceAtTick(tickUpper),
+                maxLiquidityPerTick
+            );
+
+            maxAmount0 = maxAmount0 == 0 ? 1 : maxAmount0 > STARTING_USER_BALANCE ? STARTING_USER_BALANCE : maxAmount0;
+            maxAmount1 = maxAmount1 == 0 ? 1 : maxAmount1 > STARTING_USER_BALANCE ? STARTING_USER_BALANCE : maxAmount1;
+            amount0 = bound(amount0, 1, maxAmount0);
+            amount1 = bound(amount1, 1, maxAmount1);
+        }
+
+        uint256 tokenId = lpm.nextTokenId();
+
+        BalanceDiff memory balance0 = BalanceDiff(fotKey.currency0.balanceOf(address(this)), 0);
+        BalanceDiff memory balance1 = BalanceDiff(fotKey.currency1.balanceOf(address(this)), 0);
+        BalanceDiff memory balance0PM = BalanceDiff(fotKey.currency0.balanceOf(address(manager)), 0);
+        BalanceDiff memory balance1PM = BalanceDiff(fotKey.currency1.balanceOf(address(manager)), 0);
+
+        Plan memory planner = Planner.init();
+
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency0, amount0, true));
+        planner.add(Actions.SETTLE, abi.encode(fotKey.currency1, amount1, true));
+        planner.add(
+            Actions.MINT_POSITION_FROM_DELTAS,
+            abi.encode(
+                fotKey,
+                tickLower,
+                tickUpper,
+                MAX_SLIPPAGE_INCREASE,
+                MAX_SLIPPAGE_INCREASE,
+                ActionConstants.MSG_SENDER,
+                ZERO_BYTES
+            )
+        );
+        // take the excess of each currency
+        planner.add(Actions.TAKE_PAIR, abi.encode(fotKey.currency0, fotKey.currency1, ActionConstants.MSG_SENDER));
+
+        // needed to remove variables because of stack too deep
+        // Read below as:
+        // bool currency0IsFOT = fotKey.currency0 == Currency.wrap(address(fotToken));
+        // bool positionIsEntirelyInOtherToken = currency0IsFOT
+        //     ? TickMath.getSqrtPriceAtTick(tickUpper) <= sqrtPriceX96
+        //     : TickMath.getSqrtPriceAtTick(tickLower) >= sqrtPriceX96;
+        // if (bips == 10000 && !positionIsEntirelyInOtherToken) {
+        if (
+            bips == 10000
+                && !(
+                    fotKey.currency0 == Currency.wrap(address(fotToken))
+                        ? TickMath.getSqrtPriceAtTick(tickUpper) <= sqrtPriceX96
+                        : TickMath.getSqrtPriceAtTick(tickLower) >= sqrtPriceX96
+                )
+        ) {
+            vm.expectRevert(Position.CannotUpdateEmptyPosition.selector);
+            lpm.modifyLiquidities(planner.encode(), _deadline);
+        } else {
+            // MINT FROM DELTAS.
+            lpm.modifyLiquidities(planner.encode(), _deadline);
+
+            balance0._after = fotKey.currency0.balanceOf(address(this));
+            balance1._after = fotKey.currency1.balanceOf(address(this));
+            balance0PM._after = fotKey.currency0.balanceOf(address(manager));
+            balance1PM._after = fotKey.currency1.balanceOf(address(manager));
+
+            // Calculate the expected resulting balances used to create liquidity after the fee is applied.
+            Balance memory expected;
+            {
+                bool currency0IsFOT = fotKey.currency0 == Currency.wrap(address(fotToken));
+                uint256 expectedFee = (currency0IsFOT ? amount0 : amount1).calculatePortion(bips);
+                (expected._0, expected._1) = currency0IsFOT
+                    ? (balance0._before - balance0._after - expectedFee, balance1._before - balance1._after)
+                    : (balance0._before - balance0._after, balance1._before - balance1._after - expectedFee);
+            }
+            assertEq(expected._0, balance0PM._after - balance0PM._before);
+            assertEq(expected._1, balance1PM._after - balance1PM._before);
+            {
+                // the liquidity that was created is a diff of the balance change
+                uint128 expectedLiquidity = LiquidityAmounts.getLiquidityForAmounts(
+                    sqrtPriceX96,
+                    TickMath.getSqrtPriceAtTick(tickLower),
+                    TickMath.getSqrtPriceAtTick(tickUpper),
+                    expected._0,
+                    expected._1
+                );
+
+                assertEq(IERC721(address(lpm)).ownerOf(tokenId), address(this));
+                assertEq(lpm.getPositionLiquidity(tokenId), expectedLiquidity);
+            }
+            // BURN.
+            planner = Planner.init();
+            // Note that the slippage does not include the fee from the transfer.
+            planner.add(
+                Actions.BURN_POSITION,
+                abi.encode(
+                    tokenId, expected._0 == 0 ? 0 : expected._0 - 1, expected._1 == 0 ? 0 : expected._1 - 1, ZERO_BYTES
+                )
+            );
+
+            planner.add(Actions.TAKE_PAIR, abi.encode(fotKey.currency0, fotKey.currency1, ActionConstants.MSG_SENDER));
+
+            lpm.modifyLiquidities(planner.encode(), _deadline);
+
+            assertEq(lpm.getPositionLiquidity(tokenId), 0);
+        }
     }
 }

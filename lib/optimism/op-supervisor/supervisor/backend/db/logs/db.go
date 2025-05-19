@@ -38,22 +38,25 @@ type DB struct {
 	store  entrydb.EntryStore[EntryType, Entry]
 	rwLock sync.RWMutex
 
+	chainID eth.ChainID
+
 	lastEntryContext logContext
 }
 
-func NewFromFile(logger log.Logger, m Metrics, path string, trimToLastSealed bool) (*DB, error) {
+func NewFromFile(logger log.Logger, m Metrics, chainID eth.ChainID, path string, trimToLastSealed bool) (*DB, error) {
 	store, err := entrydb.NewEntryDB[EntryType, Entry, EntryBinary](logger, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open DB: %w", err)
 	}
-	return NewFromEntryStore(logger, m, store, trimToLastSealed)
+	return NewFromEntryStore(logger, m, chainID, store, trimToLastSealed)
 }
 
-func NewFromEntryStore(logger log.Logger, m Metrics, store entrydb.EntryStore[EntryType, Entry], trimToLastSealed bool) (*DB, error) {
+func NewFromEntryStore(logger log.Logger, m Metrics, chainID eth.ChainID, store entrydb.EntryStore[EntryType, Entry], trimToLastSealed bool) (*DB, error) {
 	db := &DB{
-		log:   logger,
-		m:     m,
-		store: store,
+		log:     logger,
+		m:       m,
+		store:   store,
+		chainID: chainID,
 	}
 	if err := db.init(trimToLastSealed); err != nil {
 		return nil, fmt.Errorf("failed to init database: %w", err)
@@ -191,6 +194,9 @@ func (db *DB) OpenBlock(blockNum uint64) (ref eth.BlockRef, logCount uint32, exe
 			retErr = err
 			return
 		}
+		if seal.Number != 0 {
+			db.log.Warn("The first block is not block 0", "block", seal.Number)
+		}
 		ref = eth.BlockRef{
 			Hash:       seal.Hash,
 			Number:     seal.Number,
@@ -245,55 +251,58 @@ func (db *DB) OpenBlock(blockNum uint64) (ref eth.BlockRef, logCount uint32, exe
 	return
 }
 
-// LatestSealedBlockNum returns the block number of the block that was last sealed,
+// LatestSealedBlock returns the block ID of the block that was last sealed,
 // or ok=false if there is no sealed block (i.e. empty DB)
-func (db *DB) LatestSealedBlockNum() (n uint64, ok bool) {
+func (db *DB) LatestSealedBlock() (id eth.BlockID, ok bool) {
 	db.rwLock.RLock()
 	defer db.rwLock.RUnlock()
 	if db.lastEntryContext.nextEntryIndex == 0 {
-		return 0, false // empty DB, time to add the first seal
+		return eth.BlockID{}, false // empty DB, time to add the first seal
 	}
 	if !db.lastEntryContext.hasCompleteBlock() {
 		db.log.Debug("New block is already in progress", "num", db.lastEntryContext.blockNum)
+		// TODO: is the hash invalid here. When we have a read-lock, can this ever happen?
 	}
-	return db.lastEntryContext.blockNum, true
-}
-
-// Get returns the hash of the log at the specified blockNum (of the sealed block)
-// and logIdx (of the log after the block), or an error if the log is not found.
-func (db *DB) Get(blockNum uint64, logIdx uint32) (common.Hash, error) {
-	db.rwLock.RLock()
-	defer db.rwLock.RUnlock()
-	hash, _, err := db.findLogInfo(blockNum, logIdx)
-	return hash, err
+	return eth.BlockID{
+		Hash:   db.lastEntryContext.blockHash,
+		Number: db.lastEntryContext.blockNum,
+	}, true
 }
 
 // Contains returns no error iff the specified logHash is recorded in the specified blockNum and logIdx.
-// If the log is out of reach, then ErrFuture is returned.
+// If the log is out of reach and the block is complete, an ErrConflict is returned.
+// If the log is out of reach and the block is not complete, an ErrFuture is returned.
 // If the log is determined to conflict with the canonical chain, then ErrConflict is returned.
 // logIdx is the index of the log in the array of all logs in the block.
 // This can be used to check the validity of cross-chain interop events.
 // The block-seal of the blockNum block, that the log was included in, is returned.
 // This seal may be fully zeroed, without error, if the block isn't fully known yet.
-func (db *DB) Contains(blockNum uint64, logIdx uint32, logHash common.Hash) (types.BlockSeal, error) {
+func (db *DB) Contains(query types.ContainsQuery) (types.BlockSeal, error) {
+	blockNum, logIdx, timestamp := query.BlockNum, query.LogIdx, query.Timestamp
 	db.rwLock.RLock()
 	defer db.rwLock.RUnlock()
-	db.log.Trace("Checking for log", "blockNum", blockNum, "logIdx", logIdx, "hash", logHash)
+	db.log.Trace("Checking for log", "blockNum", blockNum, "logIdx", logIdx)
 
 	// Hot-path: check if we have the block
 	if db.lastEntryContext.hasCompleteBlock() && db.lastEntryContext.blockNum < blockNum {
+		// it is possible that while the included Block Number is beyond the end of the database,
+		// the included timestamp is within the database. In this case we know the request is not just a ErrFuture,
+		// but a ErrConflict, as we know the request will not be included in the future.
+		if db.lastEntryContext.timestamp > timestamp {
+			return types.BlockSeal{}, types.ErrConflict
+		}
 		return types.BlockSeal{}, types.ErrFuture
 	}
 
-	evtHash, iter, err := db.findLogInfo(blockNum, logIdx)
+	entryLogHash, iter, err := db.findLogInfo(blockNum, logIdx)
 	if err != nil {
+		// if we get an ErrFuture but have a complete block, then we really have a conflict
+		if errors.Is(err, types.ErrFuture) && db.lastEntryContext.hasCompleteBlock() {
+			return types.BlockSeal{}, types.ErrConflict
+		}
 		return types.BlockSeal{}, err // may be ErrConflict if the block does not have as many logs
 	}
-	db.log.Trace("Found initiatingEvent", "blockNum", blockNum, "logIdx", logIdx, "hash", evtHash)
-	// Found the requested block and log index, check if the hash matches
-	if evtHash != logHash {
-		return types.BlockSeal{}, fmt.Errorf("payload hash mismatch: expected %s, got %s %w", logHash, evtHash, types.ErrConflict)
-	}
+	db.log.Trace("Found initiatingEvent", "blockNum", blockNum, "logIdx", logIdx, "hash", entryLogHash)
 	// Now find the block seal after the log, to identify where the log was included in.
 	err = iter.TraverseConditional(func(state IteratorState) error {
 		_, n, ok := state.SealedBlock()
@@ -311,18 +320,40 @@ func (db *DB) Contains(blockNum uint64, logIdx uint32, logHash common.Hash) (typ
 	if err == nil {
 		panic("expected iterator to stop with error")
 	}
+	// ErrStop indicates we've found the block, and the iterator is positioned at it.
 	if errors.Is(err, types.ErrStop) {
-		h, n, _ := iter.SealedBlock()
-		timestamp, _ := iter.SealedTimestamp()
+		h, n, ok := iter.SealedBlock()
+		if !ok {
+			return types.BlockSeal{}, fmt.Errorf("iterator stopped but no sealed block found")
+		}
+		t, _ := iter.SealedTimestamp()
+		// check the timestamp invariant on the result
+		if t != timestamp {
+			return types.BlockSeal{}, fmt.Errorf("timestamp mismatch: expected %d, got %d %w", timestamp, t, types.ErrConflict)
+		}
+		entryChecksum := types.ChecksumArgs{
+			BlockNumber: n,
+			LogIndex:    logIdx,
+			Timestamp:   t,
+			ChainID:     db.chainID,
+			LogHash:     entryLogHash,
+		}.Checksum()
+		// Found the requested block and log index, check if the hash matches
+		if entryChecksum != query.Checksum {
+			return types.BlockSeal{}, fmt.Errorf("payload hash mismatch: expected %s, got %s %w", query.Checksum, entryChecksum, types.ErrConflict)
+		}
+		// construct a block seal with the found data now that we know it's correct
 		return types.BlockSeal{
 			Hash:      h,
 			Number:    n,
-			Timestamp: timestamp,
+			Timestamp: t,
 		}, nil
 	}
 	return types.BlockSeal{}, err
 }
 
+// findLogInfo returns the hash of the log at the specified block number and log index.
+// If a log isn't found at the index we return an ErrFuture, even if the block is complete.
 func (db *DB) findLogInfo(blockNum uint64, logIdx uint32) (common.Hash, Iterator, error) {
 	if blockNum == 0 {
 		return common.Hash{}, nil, types.ErrConflict // no logs in block 0
@@ -543,20 +574,24 @@ func (db *DB) AddLog(logHash common.Hash, parentBlock eth.BlockID, logIdx uint32
 }
 
 // Rewind the database to remove any blocks after headBlockNum
-// The block at headBlockNum itself is not removed.
-func (db *DB) Rewind(newHeadBlockNum uint64) error {
+// The block at newHead.Number itself is not removed.
+func (db *DB) Rewind(newHead eth.BlockID) error {
 	db.rwLock.Lock()
 	defer db.rwLock.Unlock()
 	// Even if the last fully-processed block matches headBlockNum,
 	// we might still have trailing log events to get rid of.
-	iter, err := db.newIteratorAt(newHeadBlockNum, 0)
+	iter, err := db.newIteratorAt(newHead.Number, 0)
 	if err != nil {
 		return err
 	}
-	// Truncate to contain idx+1 entries, since indices are 0 based,
-	// this deletes everything after idx
-	if err := db.store.Truncate(iter.NextIndex()); err != nil {
-		return fmt.Errorf("failed to truncate to block %v: %w", newHeadBlockNum, err)
+	if hash, num, ok := iter.SealedBlock(); !ok {
+		return fmt.Errorf("expected sealed block for rewind reference-point: %w", types.ErrDataCorruption)
+	} else if hash != newHead.Hash {
+		return fmt.Errorf("cannot rewind to %s, have %s: %w", newHead, eth.BlockID{Hash: hash, Number: num}, types.ErrConflict)
+	}
+	// Truncate to contain idx entries. The Truncate func keeps the given index as last index.
+	if err := db.store.Truncate(iter.NextIndex() - 1); err != nil {
+		return fmt.Errorf("failed to truncate to block %s: %w", newHead, err)
 	}
 	// Use db.init() to find the log context for the new latest log entry
 	if err := db.init(true); err != nil {

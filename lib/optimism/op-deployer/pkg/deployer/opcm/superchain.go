@@ -1,7 +1,6 @@
 package opcm
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum-optimism/optimism/op-chain-ops/foundry"
@@ -27,19 +26,15 @@ func (dsi *DeploySuperchainInput) InputSet() bool {
 }
 
 type DeploySuperchainOutput struct {
-	SuperchainProxyAdmin  common.Address
-	SuperchainConfigImpl  common.Address
-	SuperchainConfigProxy common.Address
-	ProtocolVersionsImpl  common.Address
-	ProtocolVersionsProxy common.Address
+	SuperchainProxyAdmin  common.Address `json:"proxyAdminAddress"`
+	SuperchainConfigImpl  common.Address `json:"superchainConfigImplAddress"`
+	SuperchainConfigProxy common.Address `json:"superchainConfigProxyAddress"`
+	ProtocolVersionsImpl  common.Address `json:"protocolVersionsImplAddress"`
+	ProtocolVersionsProxy common.Address `json:"protocolVersionsProxyAddress"`
 }
 
 func (output *DeploySuperchainOutput) CheckOutput(input common.Address) error {
 	return nil
-}
-
-type DeploySuperchainScript struct {
-	Run func(in common.Address, out common.Address) error
 }
 
 type DeploySuperchainOpts struct {
@@ -53,37 +48,5 @@ type DeploySuperchainOpts struct {
 }
 
 func DeploySuperchain(h *script.Host, input DeploySuperchainInput) (DeploySuperchainOutput, error) {
-	var dso DeploySuperchainOutput
-
-	inputAddr := h.NewScriptAddress()
-	outputAddr := h.NewScriptAddress()
-
-	cleanupInput, err := script.WithPrecompileAtAddress[*DeploySuperchainInput](h, inputAddr, &input)
-	if err != nil {
-		return dso, fmt.Errorf("failed to insert DeploySuperchainInput precompile: %w", err)
-	}
-	defer cleanupInput()
-
-	cleanupOutput, err := script.WithPrecompileAtAddress[*DeploySuperchainOutput](
-		h,
-		outputAddr,
-		&dso,
-		script.WithFieldSetter[*DeploySuperchainOutput],
-	)
-	if err != nil {
-		return dso, fmt.Errorf("failed to insert DeploySuperchainOutput precompile: %w", err)
-	}
-	defer cleanupOutput()
-
-	deployScript, cleanupDeploy, err := script.WithScript[DeploySuperchainScript](h, "DeploySuperchain.s.sol", "DeploySuperchain")
-	if err != nil {
-		return dso, fmt.Errorf("failed to load DeploySuperchain script: %w", err)
-	}
-	defer cleanupDeploy()
-
-	if err := deployScript.Run(inputAddr, outputAddr); err != nil {
-		return dso, fmt.Errorf("failed to run DeploySuperchain script: %w", err)
-	}
-
-	return dso, nil
+	return RunScriptSingle[DeploySuperchainInput, DeploySuperchainOutput](h, input, "DeploySuperchain.s.sol", "DeploySuperchain")
 }

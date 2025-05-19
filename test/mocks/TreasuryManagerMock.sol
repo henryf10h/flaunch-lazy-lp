@@ -8,7 +8,7 @@ contract TreasuryManagerMock is TreasuryManager {
 
     constructor (address _treasuryManagerFactory) TreasuryManager(_treasuryManagerFactory) {}
 
-    function _initialize(TreasuryManager.FlaunchToken calldata, bytes calldata) internal override {
+    function _initialize(address _owner, bytes calldata) internal override {
         // ..
     }
 

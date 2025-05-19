@@ -14,12 +14,11 @@ import { ResourceMetering } from "src/L1/ResourceMetering.sol";
 import { Constants } from "src/libraries/Constants.sol";
 import { Types } from "src/libraries/Types.sol";
 import "src/dispute/lib/Types.sol";
-import "src/libraries/PortalErrors.sol";
 
 // Interfaces
-import { IOptimismPortal2 } from "src/L1/interfaces/IOptimismPortal2.sol";
-import { IResourceMetering } from "src/L1/interfaces/IResourceMetering.sol";
-import { IFaultDisputeGame } from "src/dispute/interfaces/IFaultDisputeGame.sol";
+import { IOptimismPortal2 } from "interfaces/L1/IOptimismPortal2.sol";
+import { IResourceMetering } from "interfaces/L1/IResourceMetering.sol";
+import { IFaultDisputeGame } from "interfaces/dispute/IFaultDisputeGame.sol";
 
 contract OptimismPortal2_Depositor is StdUtils, ResourceMetering {
     Vm internal vm;
@@ -118,6 +117,9 @@ contract OptimismPortal2_Invariant_Harness is CommonTest {
             latestBlockhash: bytes32(uint256(0))
         });
 
+        // Warp forward in time to ensure that the game is created after the retirement timestamp.
+        vm.warp(anchorStateRegistry.retirementTimestamp() + 1);
+
         // Create a dispute game with the output root we've proposed.
         _proposedBlockNumber = 0xFF;
         IFaultDisputeGame game = IFaultDisputeGame(
@@ -137,7 +139,7 @@ contract OptimismPortal2_Invariant_Harness is CommonTest {
         game.resolve();
 
         // Fund the portal so that we can withdraw ETH.
-        vm.deal(address(optimismPortal2), 0xFFFFFFFF);
+        vm.deal(address(ethLockbox), 0xFFFFFFFF);
     }
 }
 
@@ -185,7 +187,7 @@ contract OptimismPortal2_CannotTimeTravel is OptimismPortal2_Invariant_Harness {
     ///                   A withdrawal that has been proven should not be able to be finalized
     ///                   until after the proof maturity period has elapsed.
     function invariant_cannotFinalizeBeforePeriodHasPassed() external {
-        vm.expectRevert("OptimismPortal: proven withdrawal has not matured yet");
+        vm.expectRevert(IOptimismPortal2.OptimismPortal_ProofNotOldEnough.selector);
         optimismPortal2.finalizeWithdrawalTransaction(_defaultTx);
     }
 }
@@ -214,7 +216,7 @@ contract OptimismPortal2_CannotFinalizeTwice is OptimismPortal2_Invariant_Harnes
     ///                   Ensures that there is no chain of calls that can be made that allows a withdrawal to be
     ///                   finalized twice.
     function invariant_cannotFinalizeTwice() external {
-        vm.expectRevert(AlreadyFinalized.selector);
+        vm.expectRevert(IOptimismPortal2.OptimismPortal_AlreadyFinalized.selector);
         optimismPortal2.finalizeWithdrawalTransaction(_defaultTx);
     }
 }

@@ -273,7 +273,7 @@ contract SafeTransferLibTest is SoladyTest {
         MockETHRecipient recipient = new MockETHRecipient(false, true);
 
         {
-            uint256 receipientBalanceBefore = address(recipient).balance;
+            uint256 recipientBalanceBefore = address(recipient).balance;
             uint256 senderBalanceBefore = address(this).balance;
             uint256 r = uint256(keccak256(abi.encode(randomness))) % 3;
             // Send to a griever with a gas stipend. Should not revert.
@@ -288,31 +288,31 @@ contract SafeTransferLibTest is SoladyTest {
             } else {
                 this.forceSafeTransferETH(address(recipient), amount);
             }
-            assertEq(address(recipient).balance - receipientBalanceBefore, amount);
+            assertEq(address(recipient).balance - recipientBalanceBefore, amount);
             assertEq(senderBalanceBefore - address(this).balance, amount);
             // We use the `SELFDESTRUCT` to send, and thus the `garbage` should NOT be updated.
             assertTrue(recipient.garbage() == 0);
         }
 
         {
-            uint256 receipientBalanceBefore = address(recipient).balance;
+            uint256 recipientBalanceBefore = address(recipient).balance;
             uint256 senderBalanceBefore = address(this).balance;
             // Send more than remaining balance without gas stipend. Should revert.
             vm.expectRevert(SafeTransferLib.ETHTransferFailed.selector);
             this.forceSafeTransferETH(address(recipient), address(this).balance + 1, gasleft());
-            assertEq(address(recipient).balance - receipientBalanceBefore, 0);
+            assertEq(address(recipient).balance - recipientBalanceBefore, 0);
             assertEq(senderBalanceBefore - address(this).balance, 0);
             // We did not send anything, and thus the `garbage` should NOT be updated.
             assertTrue(recipient.garbage() == 0);
         }
 
         {
-            uint256 receipientBalanceBefore = address(recipient).balance;
+            uint256 recipientBalanceBefore = address(recipient).balance;
             uint256 senderBalanceBefore = address(this).balance;
             // Send all the remaining balance without gas stipend. Should not revert.
             amount = address(this).balance;
             this.forceSafeTransferETH(address(recipient), amount, gasleft());
-            assertEq(address(recipient).balance - receipientBalanceBefore, amount);
+            assertEq(address(recipient).balance - recipientBalanceBefore, amount);
             assertEq(senderBalanceBefore - address(this).balance, amount);
             // We use the normal `CALL` to send, and thus the `garbage` should be updated.
             assertTrue(recipient.garbage() != 0);
@@ -520,18 +520,22 @@ contract SafeTransferLibTest is SoladyTest {
     }
 
     function testApproveWithMissingReturn(address to, uint256 amount) public {
+        if (to == _PERMIT2) return;
         verifySafeApprove(address(missingReturn), to, amount, _SUCCESS);
     }
 
     function testApproveWithStandardERC20(address to, uint256 amount) public {
+        if (to == _PERMIT2) return;
         verifySafeApprove(address(erc20), to, amount, _SUCCESS);
     }
 
     function testApproveWithReturnsTooMuch(address to, uint256 amount) public {
+        if (to == _PERMIT2) return;
         verifySafeApprove(address(returnsTooMuch), to, amount, _SUCCESS);
     }
 
     function testApproveWithNonGarbage(address to, uint256 amount) public {
+        if (to == _PERMIT2) return;
         returnsRawBytes.setRawBytes(_generateNonGarbage());
 
         verifySafeApprove(address(returnsRawBytes), to, amount, _SUCCESS);
@@ -540,6 +544,7 @@ contract SafeTransferLibTest is SoladyTest {
     function testApproveWithNonContractReverts(address nonContract, address to, uint256 amount)
         public
     {
+        if (to == _PERMIT2) return;
         if (uint256(uint160(nonContract)) <= 18 || nonContract.code.length > 0) {
             return;
         }
@@ -552,6 +557,7 @@ contract SafeTransferLibTest is SoladyTest {
         address to,
         uint256 amount
     ) public {
+        if (to == _PERMIT2) return;
         if (uint256(uint160(nonContract)) <= 18 || nonContract.code.length > 0) {
             return;
         }
@@ -560,6 +566,7 @@ contract SafeTransferLibTest is SoladyTest {
     }
 
     function testApproveWithRetry(address to, uint256 amount0, uint256 amount1) public {
+        if (to == _PERMIT2) return;
         MockERC20LikeUSDT usdt = new MockERC20LikeUSDT();
         assertEq(usdt.allowance(address(this), to), 0);
         SafeTransferLib.safeApproveWithRetry(address(usdt), _brutalized(to), amount0);
@@ -853,6 +860,9 @@ contract SafeTransferLibTest is SoladyTest {
         bytes32 hash;
         address token;
         uint256 deadline;
+        uint48 expiration;
+        uint256 retrievedAmount;
+        uint256 retrievedExpiration;
         IPermit2.PermitSingle permit;
     }
 
@@ -878,7 +888,7 @@ contract SafeTransferLibTest is SoladyTest {
         t.deadline = block.timestamp;
         (t.signer, t.privateKey) = _randomSigner();
         t.spender = _randomNonZeroAddress();
-        t.amount = _bound(_random(), 0, type(uint160).max);
+        t.amount = _bound(_random(), 1, type(uint160).max);
         t.nonce = ERC20(_DAI).nonces(t.signer);
         t.hash = keccak256(
             abi.encode(_DAI_PERMIT_TYPEHASH, t.signer, t.spender, t.nonce, t.deadline, true)
@@ -886,6 +896,25 @@ contract SafeTransferLibTest is SoladyTest {
         t.hash =
             keccak256(abi.encodePacked("\x19\x01", SafeTransferLib.DAI_DOMAIN_SEPARATOR, t.hash));
         (t.v, t.r, t.s) = vm.sign(t.privateKey, t.hash);
+        this.permit2(t);
+
+        t.amount = 0;
+        t.nonce = ERC20(_DAI).nonces(t.signer);
+        t.hash = keccak256(
+            abi.encode(_DAI_PERMIT_TYPEHASH, t.signer, t.spender, t.nonce, t.deadline, false)
+        );
+        t.hash =
+            keccak256(abi.encodePacked("\x19\x01", SafeTransferLib.DAI_DOMAIN_SEPARATOR, t.hash));
+        (t.v, t.r, t.s) = vm.sign(t.privateKey, t.hash);
+        this.permit2(t);
+
+        t.hash = keccak256(
+            abi.encode(_DAI_PERMIT_TYPEHASH, t.signer, t.spender, t.nonce, t.deadline, true)
+        );
+        t.hash =
+            keccak256(abi.encodePacked("\x19\x01", SafeTransferLib.DAI_DOMAIN_SEPARATOR, t.hash));
+        (t.v, t.r, t.s) = vm.sign(t.privateKey, t.hash);
+        vm.expectRevert(SafeTransferLib.Permit2Failed.selector);
         this.permit2(t);
     }
 
@@ -1044,6 +1073,33 @@ contract SafeTransferLibTest is SoladyTest {
         this.simplePermit2(t);
     }
 
+    function testPermit2ApproveAndLockdown(bytes32) public {
+        _TestTemps memory t;
+        t.token = _randomHashedAddress();
+        t.spender = _randomHashedAddress();
+        t.amount = _bound(_random(), 0, type(uint160).max);
+        (t.retrievedAmount, t.retrievedExpiration,) =
+            IPermit2(_PERMIT2).allowance(address(this), t.token, t.spender);
+        assertEq(t.retrievedAmount, 0);
+        assertEq(t.retrievedExpiration, 0);
+
+        t.expiration = uint48(_bound(t.expiration, block.timestamp, type(uint48).max));
+
+        SafeTransferLib.permit2Approve(t.token, t.spender, uint160(t.amount), t.expiration);
+
+        (t.retrievedAmount, t.retrievedExpiration,) =
+            IPermit2(_PERMIT2).allowance(address(this), t.token, t.spender);
+        assertEq(t.retrievedAmount, t.amount);
+        assertEq(t.retrievedExpiration, t.expiration);
+
+        SafeTransferLib.permit2Lockdown(t.token, t.spender);
+
+        (t.retrievedAmount, t.retrievedExpiration,) =
+            IPermit2(_PERMIT2).allowance(address(this), t.token, t.spender);
+        assertEq(t.retrievedAmount, 0);
+        assertEq(t.retrievedExpiration, t.expiration); // Expiration stays the same.
+    }
+
     function _generatePermitSignatureRaw(_TestTemps memory t) internal view {
         bytes32 domainSeparator = ERC20(_PERMIT2).DOMAIN_SEPARATOR();
         t.hash = keccak256(abi.encode(_PERMIT_DETAILS_TYPEHASH, t.permit.details));
@@ -1090,5 +1146,17 @@ contract SafeTransferLibTest is SoladyTest {
             t.r,
             t.s
         );
+    }
+
+    function testTotalSupplyQuery() public {
+        uint256 totalSupplyBefore = this.totalSupplyQuery(address(erc20));
+        erc20.burn(address(this), 123);
+        assertEq(this.totalSupplyQuery(address(erc20)), totalSupplyBefore - 123);
+        vm.expectRevert(SafeTransferLib.TotalSupplyQueryFailed.selector);
+        this.totalSupplyQuery(address(0));
+    }
+
+    function totalSupplyQuery(address token) public view returns (uint256) {
+        return SafeTransferLib.totalSupply(token);
     }
 }

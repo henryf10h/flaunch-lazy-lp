@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.15;
+pragma solidity ^0.8.0;
 
 /// @title LibKeccak
 /// @notice An EVM implementation of the Keccak-f[1600] permutation.
@@ -87,31 +87,32 @@ library LibKeccak {
                 let xs1 := xor(stateElem(ptr, 1), D1)
                 let A1 := xor(shl(1, xs1), shr(63, xs1))
 
-                setStateElem(ptr, 0, xor(stateElem(ptr, 0), D0))
-                rhoPi(ptr, 1, 6, 44, D1)
-                rhoPi(ptr, 6, 9, 20, D4)
-                rhoPi(ptr, 9, 22, 61, D2)
-                rhoPi(ptr, 22, 14, 39, D4)
-                rhoPi(ptr, 14, 20, 18, D0)
-                rhoPi(ptr, 20, 2, 62, D2)
-                rhoPi(ptr, 2, 12, 43, D2)
-                rhoPi(ptr, 12, 13, 25, D3)
-                rhoPi(ptr, 13, 19, 8, D4)
-                rhoPi(ptr, 19, 23, 56, D3)
-                rhoPi(ptr, 23, 15, 41, D0)
-                rhoPi(ptr, 15, 4, 27, D4)
-                rhoPi(ptr, 4, 24, 14, D4)
-                rhoPi(ptr, 24, 21, 2, D1)
-                rhoPi(ptr, 21, 8, 55, D3)
-                rhoPi(ptr, 8, 16, 45, D1)
-                rhoPi(ptr, 16, 5, 36, D0)
-                rhoPi(ptr, 5, 3, 28, D3)
-                rhoPi(ptr, 3, 18, 21, D3)
-                rhoPi(ptr, 18, 17, 15, D2)
-                rhoPi(ptr, 17, 11, 10, D1)
-                rhoPi(ptr, 11, 7, 6, D2)
-                rhoPi(ptr, 7, 10, 3, D0)
-                setStateElem(ptr, 10, A1)
+                let _ptr := ptr
+                setStateElem(_ptr, 0, xor(stateElem(_ptr, 0), D0))
+                rhoPi(_ptr, 1, 6, 44, D1)
+                rhoPi(_ptr, 6, 9, 20, D4)
+                rhoPi(_ptr, 9, 22, 61, D2)
+                rhoPi(_ptr, 22, 14, 39, D4)
+                rhoPi(_ptr, 14, 20, 18, D0)
+                rhoPi(_ptr, 20, 2, 62, D2)
+                rhoPi(_ptr, 2, 12, 43, D2)
+                rhoPi(_ptr, 12, 13, 25, D3)
+                rhoPi(_ptr, 13, 19, 8, D4)
+                rhoPi(_ptr, 19, 23, 56, D3)
+                rhoPi(_ptr, 23, 15, 41, D0)
+                rhoPi(_ptr, 15, 4, 27, D4)
+                rhoPi(_ptr, 4, 24, 14, D4)
+                rhoPi(_ptr, 24, 21, 2, D1)
+                rhoPi(_ptr, 21, 8, 55, D3)
+                rhoPi(_ptr, 8, 16, 45, D1)
+                rhoPi(_ptr, 16, 5, 36, D0)
+                rhoPi(_ptr, 5, 3, 28, D3)
+                rhoPi(_ptr, 3, 18, 21, D3)
+                rhoPi(_ptr, 18, 17, 15, D2)
+                rhoPi(_ptr, 17, 11, 10, D1)
+                rhoPi(_ptr, 11, 7, 6, D2)
+                rhoPi(_ptr, 7, 10, 3, D0)
+                setStateElem(_ptr, 10, A1)
             }
 
             // Inner `chi` function, unrolled in `chi` for performance.
@@ -180,7 +181,7 @@ library LibKeccak {
     function absorb(StateMatrix memory _stateMatrix, bytes memory _input) internal pure {
         assembly {
             // The input must be 1088 bits long.
-            if iszero(eq(mload(_input), 136)) { revert(0, 0) }
+            if iszero(eq(mload(_input), BLOCK_SIZE_BYTES)) { revert(0, 0) }
 
             let dataPtr := add(_input, 0x20)
             let statePtr := add(_stateMatrix, 0x20)
@@ -283,7 +284,7 @@ library LibKeccak {
                 // Clean the full padding block. It is possible that this memory is dirty, since solidity sometimes does
                 // not update the free memory pointer when allocating memory, for example with external calls. To do
                 // this, we read out-of-bounds from the calldata, which will always return 0 bytes.
-                calldatacopy(endPtr, calldatasize(), 0x88)
+                calldatacopy(endPtr, calldatasize(), BLOCK_SIZE_BYTES)
 
                 // If the input is a perfect multiple of the block size, then we add a full extra block of padding.
                 mstore8(endPtr, 0x01)
@@ -345,7 +346,7 @@ library LibKeccak {
                 // Clean the full padding block. It is possible that this memory is dirty, since solidity sometimes does
                 // not update the free memory pointer when allocating memory, for example with external calls. To do
                 // this, we read out-of-bounds from the calldata, which will always return 0 bytes.
-                calldatacopy(endPtr, calldatasize(), 0x88)
+                calldatacopy(endPtr, calldatasize(), BLOCK_SIZE_BYTES)
 
                 // If the input is a perfect multiple of the block size, then we add a full extra block of padding.
                 mstore8(sub(add(endPtr, BLOCK_SIZE_BYTES), 0x01), 0x80)

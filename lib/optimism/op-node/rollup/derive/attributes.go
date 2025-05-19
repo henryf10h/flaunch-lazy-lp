@@ -124,19 +124,20 @@ func (ba *FetchingAttributesBuilder) PreparePayloadAttributes(ctx context.Contex
 		upgradeTxs = append(upgradeTxs, fjord...)
 	}
 
+	if ba.rollupCfg.IsIsthmusActivationBlock(nextL2Time) {
+		isthmus, err := IsthmusNetworkUpgradeTransactions()
+		if err != nil {
+			return nil, NewCriticalError(fmt.Errorf("failed to build isthmus network upgrade txs: %w", err))
+		}
+		upgradeTxs = append(upgradeTxs, isthmus...)
+	}
+
 	l1InfoTx, err := L1InfoDepositBytes(ba.rollupCfg, sysConfig, seqNumber, l1Info, nextL2Time)
 	if err != nil {
 		return nil, NewCriticalError(fmt.Errorf("failed to create l1InfoTx: %w", err))
 	}
 
 	var afterForceIncludeTxs []hexutil.Bytes
-	if ba.rollupCfg.IsInterop(nextL2Time) {
-		depositsCompleteTx, err := DepositsCompleteBytes(seqNumber, l1Info)
-		if err != nil {
-			return nil, NewCriticalError(fmt.Errorf("failed to create depositsCompleteTx: %w", err))
-		}
-		afterForceIncludeTxs = append(afterForceIncludeTxs, depositsCompleteTx)
-	}
 
 	txs := make([]hexutil.Bytes, 0, 1+len(depositTxs)+len(afterForceIncludeTxs)+len(upgradeTxs))
 	txs = append(txs, l1InfoTx)
