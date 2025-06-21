@@ -37,6 +37,7 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     struct TokenInfo {
         address memecoin;
         address payable memecoinTreasury;
+        address creator;
     }
 
     /// The maximum value of a creator's fee allocation
@@ -108,8 +109,11 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
         tokenId_ = nextTokenId;
         unchecked { nextTokenId++; }
 
-        // Mint ownership token to the creator
-        _mint(_params.creator, tokenId_);
+
+        // mint ownership token to the positionManager instead.
+        _mint(address(positionManager), tokenId_); 
+        
+        
 
         // Store the token ID
         tokenId[_params.memecoin] = tokenId_;
@@ -120,7 +124,8 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
         );
 
         // Store the token info
-        tokenInfo[tokenId_] = TokenInfo(_params.memecoin, memecoinTreasury_);
+        // update tokenInfo to include creator address ... _params.creator
+        tokenInfo[tokenId_] = TokenInfo(_params.memecoin, memecoinTreasury_, _params.creator);
     }
 
     /**
