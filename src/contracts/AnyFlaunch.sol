@@ -212,14 +212,23 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     }
 
     /**
-     * Returns the creator of the memecoin.
-     *
-     * @param _memecoin The {Memecoin} address
-     */
-    function creator(address _memecoin) public view returns (address creator_) {
-        // We use the internal call of `_ownerOf` as this will not revert when there is no
-        // owner attached to the ERC721. It will, instead, return a zero address as desired.
-        return _ownerOf(tokenId[_memecoin]);
+    * @dev Returns the creator of the token as stored in TokenInfo struct
+    * @param _memecoin The memecoin address
+    * @return The address of the token creator
+    */
+    function creator(address _memecoin) public view returns (address) {
+        uint256 _tokenId = tokenId[_memecoin];
+        return tokenInfo[_tokenId].creator;
+    }
+
+    /**
+    * @dev Returns the actual owner of the NFT (position manager)
+    * @param _memecoin The memecoin address
+    * @return The address of the NFT owner (position manager)
+    */
+    function nftManager(address _memecoin) public view returns (address) {
+        uint256 _tokenId = tokenId[_memecoin];
+        return ownerOf(_tokenId);
     }
 
     /**

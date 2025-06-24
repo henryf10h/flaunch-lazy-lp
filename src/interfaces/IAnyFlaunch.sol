@@ -10,7 +10,9 @@ interface IAnyFlaunch {
 
     function flaunch(AnyPositionManager.FlaunchParams calldata) external returns (address payable memecoinTreasury_, uint tokenId_);
 
-    function creator(address _memecoin) external view returns (address creator_);
+    function creator(address _memecoin) external view returns (address);
+
+    function nftManager(address _memecoin) external view returns (address);
 
     function memecoinTreasury(address _memecoin) external view returns (address payable memecoinTreasury_);
 
