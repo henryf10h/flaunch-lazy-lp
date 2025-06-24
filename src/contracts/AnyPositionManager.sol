@@ -27,6 +27,7 @@ import {Notifier} from '@flaunch/hooks/Notifier.sol';
 import {StoreKeys} from '@flaunch/types/StoreKeys.sol';
 import {TreasuryActionManager} from '@flaunch/treasury/ActionManager.sol';
 import {UniswapHookEvents} from '@flaunch/libraries/UniswapHookEvents.sol';
+import {FlaunchLPManager} from '@flaunch/FlaunchLPManager.sol';
 
 import {IFeeCalculator} from '@flaunch-interfaces/IFeeCalculator.sol';
 import {IAnyFlaunch} from '@flaunch-interfaces/IAnyFlaunch.sol';
@@ -57,6 +58,9 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
     error CannotBeInitializedDirectly();
     error UnknownPool(PoolId _poolId);
     error CallerIsNotApprovedCreator();
+
+    // Event for LP manager updates
+    event LPManagerUpdated(address indexed newLPManager);
 
     /// Emitted when a creator is approved to flaunch
     event CreatorApproved(address _creator, bool _isApproved);
@@ -118,6 +122,9 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         bytes initialPriceParams;
         bytes feeCalculatorParams;
     }
+
+    // LP manager contract that will be used to manage liquidity providers
+    FlaunchLPManager public lpManager;
 
     /// The minimum amount before a distribution is triggered
     uint public constant MIN_DISTRIBUTE_THRESHOLD = 0.001 ether;
@@ -493,6 +500,18 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         _emitPoolStateUpdate(_key.toId(), selector_, abi.encode(_sender, _delta, _feesAccrued));
     }
 
+    // Setter function for LP manager (onlyOwner)
+    function setLPManager(address _lpManager) external onlyOwner {
+        lpManager = FlaunchLPManager(_lpManager);
+        
+        // If using WETH, approve the LP manager to pull tokens
+        if (nativeToken != address(0) && nativeToken != 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            IERC20(nativeToken).approve(address(lpManager), type(uint).max);
+        }
+        
+        emit LPManagerUpdated(_lpManager);
+    }
+
     /**
      * The hook called after donate, emitting our price update event.
      *
@@ -643,6 +662,16 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         );
     }
 
+    // Function to configure LP pools in Uniswap V4
+    function configureLPPool(
+        PoolKey calldata _poolKey,
+        int24 _tickLower,
+        int24 _tickUpper
+    ) external onlyOwner {
+        require(address(lpManager) != address(0), "LP Manager not set");
+        lpManager.configurePool(_poolKey, _tickLower, _tickUpper);
+    }
+
     /**
      * We want to be able to distribute fees across our {FeeDistribution} recipients
      * when we reach a set threshold. This will only ever distribute the ETH equivalent
@@ -665,70 +694,57 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         // Reduce our available fees for the pool
         _poolFees[poolId].amount0 = 0;
 
-        // Find the distribution amount across our different users. The amount that treasury
-        // receives will be determined by variables throughout the distribution flow, such as
-        // the BidWall being disabled, etc.
-        // @dev Counter to the naming conventions of `feeSplit`, the `creatorFee_` is actually used
-        // as an LP fee in the AnyPositionManager for use in a `donate` call.
+        // Get fee split: expecting protocolFee = 0, lpFee = 90%, bidWallFee = 10%
         (uint bidWallFee, uint lpFee, uint protocolFee) = feeSplit(poolId, distributeAmount);
-        uint treasuryFee;
 
-        // Load our memecoin so that we can query the creator and treasury
+        // Load our memecoin
         address memecoin = address(_poolKey.memecoin(nativeToken));
 
-        // Check if our creator has been burned, as this changes fee allocation in a number of places
+        // Check if our creator has been burned
         address poolCreator = flaunchContract.creator(memecoin);
         bool poolCreatorBurned = poolCreator == address(0);
 
-        if (lpFee != 0) {
-            /**
-             * Any LP fees are donated via Uniswap V4. Donates the given currency amounts to the in-range
-             * liquidity providers of a pool.
-             *
-             * @dev Calls to donate can be frontrun adding just-in-time liquidity, with the aim of receiving
-             * a portion donated funds. As our threshold is low enough this shouldn't be an issue.
-             */
-            poolManager.donate({
-                key: _poolKey,
-                amount0: Currency.unwrap(_poolKey.currency0) == nativeToken ? lpFee : 0,
-                amount1: Currency.unwrap(_poolKey.currency1) == nativeToken ? 0 : lpFee,
-                hookData: abi.encode('')
-            });
+        // Handle LP fees (90% of total) - MAIN CHANGE HERE
+        if (lpFee != 0 && address(lpManager) != address(0)) {
+            // Check if we're dealing with native ETH or WETH
+            if (nativeToken == address(0) || nativeToken == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+                // Native ETH - send with value
+                lpManager.receiveFees{value: lpFee}(memecoin);
+            } else {
+                // WETH - need to transfer the token
+                IERC20(nativeToken).transfer(address(lpManager), lpFee);
+                lpManager.receiveFeesToken(memecoin, lpFee);
+            }
         }
 
+        // Handle BidWall fees (10% of total)
         if (bidWallFee != 0) {
-            // Check if we have an active BidWall for the pool. If we don't have an active BidWall, then
-            // we will need to instead allocate this to the protocol. If we are still in the FairLaunch
-            // window the this will just carry over into the FairLaunch created position, so we already
-            // have this value attributed.
+            // Check if we have an active BidWall for the pool
             if (bidWall.isBidWallEnabled(poolId)) {
-                // Otherwise, we can deposit directly into the BidWall as we have permission to modify
-                // liquidity outside of the window.
                 bidWall.deposit(_poolKey, bidWallFee, _beforeSwapTick, nativeToken == Currency.unwrap(_poolKey.currency0));
             } else {
-                // If we cannot import into BidWall, then treasury will be allocated the fees
-                treasuryFee += bidWallFee;
+                // If BidWall is disabled and creator not burned, add to LP fees
+                if (!poolCreatorBurned && address(lpManager) != address(0)) {
+                    if (nativeToken == address(0) || nativeToken == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+                        lpManager.receiveFees{value: bidWallFee}(memecoin);
+                    } else {
+                        IERC20(nativeToken).transfer(address(lpManager), bidWallFee);
+                        lpManager.receiveFeesToken(memecoin, bidWallFee);
+                    }
+                } else {
+                    // Last resort: send to protocol
+                    protocolFee += bidWallFee;
+                }
                 bidWallFee = 0;
             }
         }
 
-        if (treasuryFee != 0) {
-            // Ensure that the pool creator has not burned their ownership and send treasury the fees
-            if (!poolCreatorBurned) {
-                _allocateFees(poolId, flaunchContract.memecoinTreasury(memecoin), treasuryFee);
-            } else {
-                // If we cannot allocate to treasury, then protocol receives the fees
-                protocolFee += treasuryFee;
-                treasuryFee = 0;
-            }
-        }
-
-        // Finally we allocate our protocol fees
+        // Protocol fees (should be 0 based on your requirements)
         if (protocolFee != 0) {
             _allocateFees(poolId, protocolFeeRecipient, protocolFee);
         }
 
-        emit PoolFeesDistributed(poolId, distributeAmount, lpFee, bidWallFee, treasuryFee, protocolFee);
+        emit PoolFeesDistributed(poolId, distributeAmount, lpFee, bidWallFee, 0, protocolFee);
     }
 
     /**
