@@ -19,7 +19,7 @@ import {IAnyFlaunch} from '@flaunch-interfaces/IAnyFlaunch.sol';
  * This is used to prove ownership of a pool, so transferring this token would result in a new
  * pool creator being assigned.
  */
-contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
+contract LpFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
 
     error BaseURICannotBeEmpty();
     error CallerIsNotPositionManager();
@@ -37,6 +37,7 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     struct TokenInfo {
         address memecoin;
         address payable memecoinTreasury;
+        address creator;
     }
 
     /// The maximum value of a creator's fee allocation
@@ -108,8 +109,11 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
         tokenId_ = nextTokenId;
         unchecked { nextTokenId++; }
 
-        // Mint ownership token to the creator
-        _mint(_params.creator, tokenId_);
+
+        // mint ownership token to the positionManager instead.
+        _mint(address(positionManager), tokenId_); 
+        
+        
 
         // Store the token ID
         tokenId[_params.memecoin] = tokenId_;
@@ -120,7 +124,8 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
         );
 
         // Store the token info
-        tokenInfo[tokenId_] = TokenInfo(_params.memecoin, memecoinTreasury_);
+        // update tokenInfo to include creator address ... _params.creator
+        tokenInfo[tokenId_] = TokenInfo(_params.memecoin, memecoinTreasury_, _params.creator);
     }
 
     /**
@@ -207,14 +212,23 @@ contract AnyFlaunch is ERC721, IAnyFlaunch, Initializable, Ownable {
     }
 
     /**
-     * Returns the creator of the memecoin.
-     *
-     * @param _memecoin The {Memecoin} address
-     */
-    function creator(address _memecoin) public view returns (address creator_) {
-        // We use the internal call of `_ownerOf` as this will not revert when there is no
-        // owner attached to the ERC721. It will, instead, return a zero address as desired.
-        return _ownerOf(tokenId[_memecoin]);
+    * @dev Returns the creator of the token as stored in TokenInfo struct
+    * @param _memecoin The memecoin address
+    * @return The address of the token creator
+    */
+    function creator(address _memecoin) public view returns (address) {
+        uint256 _tokenId = tokenId[_memecoin];
+        return tokenInfo[_tokenId].creator;
+    }
+
+    /**
+    * @dev Returns the actual owner of the NFT (position manager)
+    * @param _memecoin The memecoin address
+    * @return The address of the NFT owner (position manager)
+    */
+    function nftManager(address _memecoin) public view returns (address) {
+        uint256 _tokenId = tokenId[_memecoin];
+        return ownerOf(_tokenId);
     }
 
     /**

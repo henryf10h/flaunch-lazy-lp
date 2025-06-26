@@ -1,23 +1,34 @@
-# ƒlaunch-lazy-lp Protocol - README
-Why provide liquidity yourself when NFTs can do it?
+# flaunch-lazy-lp
 
-## Project Setup
-We use [Foundry](https://book.getfoundry.sh/) for tests and deployment. Refer to installation instructions for foundry [here](https://github.com/foundry-rs/foundry#installation).
+## Description
+**flaunch-lazy-lp** is a protocol designed to manage NFT-based revenue streams by pooling generated ETH into a Uniswap v4 liquidity pool. The system uses a modified version of the `PositionManager.sol` contract, which owns all NFTs minted by creators, capturing their revenue and directing it into the pool. Inspired by Synthetix, the protocol tracks fees generated from the pool and allocates them proportionally to each creator.
 
-```sh
-git clone https://github.com/flayerlabs/flaunchgg-contracts.git
-cd flaunchgg-contracts
+## Relevant Contracts
+
+### 1. **FlaunchLPManager.sol**
+   - Manages the overall liquidity pool and fee distribution.
+   - Handles the aggregation of ETH revenue from NFTs and deposits it into the Uniswap v4 pool.
+   - Tracks fee shares for each creator.
+
+### 2. **LpPositionManager.sol (HOOK)**
+   - Modified version of the `PositionManager.sol` contract.
+   - Owns all NFTs minted by creators, ensuring revenue (ETH) flows into the protocol.
+
+### 3. **LpFlaunch.sol**
+
+## Running Tests with Foundry
+
+To run the tests for this project, ensure you have [Foundry](https://getfoundry.sh/) installed. Then execute the following commands:
+
+```bash
+# Install dependencies (if any)
 forge install
-```
 
-Copy `.env.sample` into `.env` and fill out the env variables.
-
-### Tests
-
-```sh
+# Run all tests
 forge test
-```
 
----
+# Run tests with verbose output
+forge test -vvv
 
-This README serves as a high-level introduction to the ƒlaunch protocol. For more technical details, refer to the linked documentation and resources.
+# Run specific test contract (e.g., FlaunchLPManager.t.sol)
+forge test --match-contract FlaunchLPManager
