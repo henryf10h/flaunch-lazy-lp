@@ -27,7 +27,7 @@ import {Notifier} from '@flaunch/hooks/Notifier.sol';
 import {StoreKeys} from '@flaunch/types/StoreKeys.sol';
 import {TreasuryActionManager} from '@flaunch/treasury/ActionManager.sol';
 import {UniswapHookEvents} from '@flaunch/libraries/UniswapHookEvents.sol';
-import {FlaunchLPManager} from '@flaunch/FlaunchLPManager.sol';
+import {FlaunchLPManager} from '@flaunch/FlaunchLpManager.sol';
 
 import {IFeeCalculator} from '@flaunch-interfaces/IFeeCalculator.sol';
 import {IAnyFlaunch} from '@flaunch-interfaces/IAnyFlaunch.sol';
@@ -500,14 +500,16 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
         _emitPoolStateUpdate(_key.toId(), selector_, abi.encode(_sender, _delta, _feesAccrued));
     }
 
-    // Setter function for LP manager (onlyOwner)
+    /**
+     * Allows the owner to set the LP manager contract address.
+     *
+     * @param _lpManager The address of the new LP manager contract
+     */
     function setLPManager(address _lpManager) external onlyOwner {
         lpManager = FlaunchLPManager(_lpManager);
         
-        // If using WETH, approve the LP manager to pull tokens
-        if (nativeToken != address(0) && nativeToken != 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
-            IERC20(nativeToken).approve(address(lpManager), type(uint).max);
-        }
+        // Approve FLETH for the LP manager to pull tokens
+        IERC20(nativeToken).approve(address(lpManager), type(uint).max);
         
         emit LPManagerUpdated(_lpManager);
     }
@@ -683,68 +685,56 @@ contract AnyPositionManager is BaseHook, FeeDistributor, InternalSwapPool, Store
      * @param _poolKey The PoolKey reference that will have fees distributed
      */
     function _distributeFees(PoolKey memory _poolKey) internal {
-        PoolId poolId = _poolKey.toId();
+    PoolId poolId = _poolKey.toId();
 
-        // Get the amount of the native token available to distribute
-        uint distributeAmount = _poolFees[poolId].amount0;
+    // Get the amount of FLETH available to distribute
+    uint distributeAmount = _poolFees[poolId].amount0;
 
-        // Ensure that the collection has sufficient fees available
-        if (distributeAmount < MIN_DISTRIBUTE_THRESHOLD) return;
+    // Ensure that the collection has sufficient fees available
+    if (distributeAmount < MIN_DISTRIBUTE_THRESHOLD) return;
 
-        // Reduce our available fees for the pool
-        _poolFees[poolId].amount0 = 0;
+    // Reduce our available fees for the pool
+    _poolFees[poolId].amount0 = 0;
 
-        // Get fee split: expecting protocolFee = 0, lpFee = 90%, bidWallFee = 10%
-        (uint bidWallFee, uint lpFee, uint protocolFee) = feeSplit(poolId, distributeAmount);
+    // Get fee split: expecting protocolFee = 0, lpFee = 90%, bidWallFee = 10%
+    (uint bidWallFee, uint lpFee, uint protocolFee) = feeSplit(poolId, distributeAmount);
 
-        // Load our memecoin
-        address memecoin = address(_poolKey.memecoin(nativeToken));
+    // Load our memecoin
+    address memecoin = address(_poolKey.memecoin(nativeToken));
 
-        // Check if our creator has been burned
-        address poolCreator = flaunchContract.creator(memecoin);
-        bool poolCreatorBurned = poolCreator == address(0);
+    // Check if our creator has been burned
+    address poolCreator = flaunchContract.creator(memecoin);
+    bool poolCreatorBurned = poolCreator == address(0);
 
-        // Handle LP fees (90% of total) - MAIN CHANGE HERE
-        if (lpFee != 0 && address(lpManager) != address(0)) {
-            // Check if we're dealing with native ETH or WETH
-            if (nativeToken == address(0) || nativeToken == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
-                // Native ETH - send with value
-                lpManager.receiveFees{value: lpFee}(memecoin);
+    // Handle LP fees (90% of total)
+    if (lpFee != 0 && address(lpManager) != address(0)) {
+        // Just call receiveFeesToken - LP manager will pull the tokens
+        lpManager.receiveFeesToken(memecoin, lpFee);
+    }
+
+    // Handle BidWall fees (10% of total)
+    if (bidWallFee != 0) {
+        // Check if we have an active BidWall for the pool
+        if (bidWall.isBidWallEnabled(poolId)) {
+            bidWall.deposit(_poolKey, bidWallFee, _beforeSwapTick, nativeToken == Currency.unwrap(_poolKey.currency0));
+        } else {
+            // If BidWall is disabled and creator not burned, add to LP fees
+            if (!poolCreatorBurned && address(lpManager) != address(0)) {
+                lpManager.receiveFeesToken(memecoin, bidWallFee);
             } else {
-                // WETH - need to transfer the token
-                IERC20(nativeToken).transfer(address(lpManager), lpFee);
-                lpManager.receiveFeesToken(memecoin, lpFee);
+                // Last resort: send to protocol
+                protocolFee += bidWallFee;
             }
+            bidWallFee = 0;
         }
+    }
 
-        // Handle BidWall fees (10% of total)
-        if (bidWallFee != 0) {
-            // Check if we have an active BidWall for the pool
-            if (bidWall.isBidWallEnabled(poolId)) {
-                bidWall.deposit(_poolKey, bidWallFee, _beforeSwapTick, nativeToken == Currency.unwrap(_poolKey.currency0));
-            } else {
-                // If BidWall is disabled and creator not burned, add to LP fees
-                if (!poolCreatorBurned && address(lpManager) != address(0)) {
-                    if (nativeToken == address(0) || nativeToken == 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
-                        lpManager.receiveFees{value: bidWallFee}(memecoin);
-                    } else {
-                        IERC20(nativeToken).transfer(address(lpManager), bidWallFee);
-                        lpManager.receiveFeesToken(memecoin, bidWallFee);
-                    }
-                } else {
-                    // Last resort: send to protocol
-                    protocolFee += bidWallFee;
-                }
-                bidWallFee = 0;
-            }
-        }
+    // Protocol fees (should be 0 based on your requirements)
+    if (protocolFee != 0) {
+        _allocateFees(poolId, protocolFeeRecipient, protocolFee);
+    }
 
-        // Protocol fees (should be 0 based on your requirements)
-        if (protocolFee != 0) {
-            _allocateFees(poolId, protocolFeeRecipient, protocolFee);
-        }
-
-        emit PoolFeesDistributed(poolId, distributeAmount, lpFee, bidWallFee, 0, protocolFee);
+    emit PoolFeesDistributed(poolId, distributeAmount, lpFee, bidWallFee, 0, protocolFee);
     }
 
     /**
